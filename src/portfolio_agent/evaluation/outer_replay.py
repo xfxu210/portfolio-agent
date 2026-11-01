@@ -16,6 +16,7 @@ import pandas as pd
 from portfolio_agent.agents.forecasting import ForecastingAgent
 from portfolio_agent.agents.providers.base import LLMProvider
 from portfolio_agent.agents.research import ResearchService
+from portfolio_agent.agents.skills import SkillRegistry
 from portfolio_agent.config import ReplayConfig
 from portfolio_agent.data.loader import DatasetStore
 from portfolio_agent.domain.schemas import ExperimentProposal, ForecastReconciliation
@@ -87,6 +88,7 @@ class ReplayEngine:
         self.config = config
         self.output = output
         self.writer = ArtifactWriter(output)
+        self.skills = SkillRegistry()
         self.research = ResearchService(
             store,
             provider,
@@ -98,12 +100,13 @@ class ReplayEngine:
             self.research,
             config.agent.reasoning,
             self.writer.append,
+            self.skills,
         )
         self.matured_stock_outcome_ids: set[str] = set()
         self.run_id = hashlib.sha256(
             (
                 f"{store.dataset_hash}:{content_hash(config.model_dump(mode='json'))}:"
-                "forecast-agent-v2"
+                "forecast-agent-v3-skills"
             ).encode()
         ).hexdigest()[:16]
 
@@ -116,6 +119,7 @@ class ReplayEngine:
         within_month_feedback: list[dict[str, Any]],
         forecast_intelligence: dict[str, Any],
     ) -> ExperimentProposal:
+        policy_skill = self.skills.get("portfolio-policy")
         context = {
             "decision_as_of": datetime.combine(day, datetime.max.time(), tzinfo=UTC).isoformat(),
             "iteration": iteration,
@@ -123,6 +127,8 @@ class ReplayEngine:
             "matured_feedback": matured_feedback[-10:],
             "within_month_feedback": within_month_feedback,
             "forecast_intelligence": forecast_intelligence,
+            "skill": policy_skill.catalog_entry(),
+            "skill_instructions": policy_skill.instructions,
         }
         result = self.provider.generate_structured(
             task="experiment_proposal",
@@ -188,6 +194,11 @@ class ReplayEngine:
                 ).isoformat(),
                 "expected_return_3m": forecast.expected_return_3m,
                 "raw_expected_return_3m": forecast.raw_expected_return_3m,
+                "deterministic_expected_return_3m": (
+                    forecast.deterministic_expected_return_3m
+                ),
+                "agent_expected_return_3m": forecast.agent_expected_return_3m,
+                "agent_blend_weight": forecast.agent_blend_weight,
                 "confidence": forecast.confidence,
                 "realized_63_session_return": realized,
                 "forecast_error": realized - forecast.expected_return_3m,
@@ -390,6 +401,7 @@ class ReplayEngine:
                 {symbol: float(priors[symbol]) for symbol in shortlist},
                 signals,
                 matured_stock_feedback,
+                current_weights=previous,
             )
             accepted_reconciliations.append(forecast_result.reconciliation)
             forecast_returns = {
@@ -406,6 +418,7 @@ class ReplayEngine:
             forecast_intelligence = {
                 "reconciliation": forecast_result.reconciliation.model_dump(mode="json"),
                 "agent_actions": list(forecast_result.actions),
+                "deterministic_inferences": forecast_result.deterministic_inferences,
                 "matured_company_forecast_feedback": matured_stock_feedback[-20:],
             }
             candidates: list[Candidate] = []
@@ -674,31 +687,56 @@ class ReplayEngine:
             else []
         )
         if stock_outcomes:
-            reconciled_errors = np.array(
-                [float(item["forecast_error"]) for item in stock_outcomes]
+            realized_values = np.array(
+                [float(item["realized_63_session_return"]) for item in stock_outcomes]
             )
-            standalone_errors = np.array(
+            standalone_values = np.array(
+                [float(item["raw_expected_return_3m"]) for item in stock_outcomes]
+            )
+            deterministic_values = np.array(
                 [
-                    float(item["realized_63_session_return"])
-                    - float(item["raw_expected_return_3m"])
+                    float(
+                        item["deterministic_expected_return_3m"]
+                        if item.get("deterministic_expected_return_3m") is not None
+                        else item["raw_expected_return_3m"]
+                    )
                     for item in stock_outcomes
                 ]
             )
+            agent_values = np.array(
+                [
+                    float(
+                        item["agent_expected_return_3m"]
+                        if item.get("agent_expected_return_3m") is not None
+                        else item["expected_return_3m"]
+                    )
+                    for item in stock_outcomes
+                ]
+            )
+            reconciled_values = np.array(
+                [float(item["expected_return_3m"]) for item in stock_outcomes]
+            )
+            reconciled_errors = realized_values - reconciled_values
+            standalone_errors = realized_values - standalone_values
+            deterministic_errors = realized_values - deterministic_values
+            agent_errors = realized_values - agent_values
             forecast_quality = {
                 "matured_forecasts": len(stock_outcomes),
+                "deterministic_mae": float(np.mean(np.abs(deterministic_errors))),
                 "standalone_mae": float(np.mean(np.abs(standalone_errors))),
+                "dynamic_agent_mae": float(np.mean(np.abs(agent_errors))),
                 "reconciled_mae": float(np.mean(np.abs(reconciled_errors))),
+                "deterministic_directional_accuracy": float(
+                    np.mean(np.sign(deterministic_values) == np.sign(realized_values))
+                ),
                 "standalone_directional_accuracy": float(
-                    np.mean(
-                        [
-                            np.sign(float(item["raw_expected_return_3m"]))
-                            == np.sign(float(item["realized_63_session_return"]))
-                            for item in stock_outcomes
-                        ]
-                    )
+                    np.mean(np.sign(standalone_values) == np.sign(realized_values))
+                ),
+                "dynamic_agent_directional_accuracy": float(
+                    np.mean(np.sign(agent_values) == np.sign(realized_values))
                 ),
                 "reconciled_directional_accuracy": float(
-                    np.mean([bool(item["direction_correct"]) for item in stock_outcomes])
+                    np.mean(np.sign(reconciled_values) == np.sign(realized_values))
                 ),
             }
         else:
@@ -751,6 +789,12 @@ class ReplayEngine:
             for line in (self.output / "traces.jsonl").read_text(encoding="utf-8").splitlines()
             if line
         )
+        skill_path = self.output / "skill_executions.jsonl"
+        skill_execution_count = (
+            sum(1 for line in skill_path.read_text(encoding="utf-8").splitlines() if line)
+            if skill_path.exists()
+            else 0
+        )
         routing = {
             stage: route.model_dump(mode="json")
             for stage, route in self.config.agent.stage_overrides.items()
@@ -772,6 +816,8 @@ class ReplayEngine:
             "matured_stock_forecast_outcomes": len(self.matured_stock_outcome_ids),
             "forecast_quality": forecast_quality,
             "model_call_count": trace_count,
+            "skill_execution_count": skill_execution_count,
+            "skill_catalog": self.skills.catalog(),
             "routing": routing,
             "metrics": metrics,
             "partition_metrics": partition_metrics,

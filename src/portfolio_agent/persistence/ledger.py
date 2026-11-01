@@ -18,6 +18,8 @@ class SQLiteLedger:
         "stock_forecast_outcomes": "stock_forecast_outcomes.jsonl",
         "agent_actions": "agent_actions.jsonl",
         "agent_observations": "agent_observations.jsonl",
+        "skill_executions": "skill_executions.jsonl",
+        "deterministic_inferences": "deterministic_inferences.jsonl",
         "projections": "projections.jsonl",
         "forecast_outcomes": "forecast_outcomes.jsonl",
     }

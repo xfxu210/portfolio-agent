@@ -29,9 +29,13 @@ type Run = {
   matured_stock_forecast_outcomes?: number;
   forecast_quality?: {
     matured_forecasts: number;
+    deterministic_mae?: number;
     standalone_mae?: number;
+    dynamic_agent_mae?: number;
     reconciled_mae?: number;
+    deterministic_directional_accuracy?: number;
     standalone_directional_accuracy?: number;
+    dynamic_agent_directional_accuracy?: number;
     reconciled_directional_accuracy?: number;
   };
   transaction_costs_ignored?: boolean;
@@ -101,6 +105,9 @@ type MonthDetail = {
       symbol: string;
       source_forecast_id: string;
       raw_expected_return_3m: number;
+      deterministic_expected_return_3m?: number | null;
+      agent_expected_return_3m?: number | null;
+      agent_blend_weight?: number | null;
       expected_return_3m: number;
       confidence: number;
       relative_rank: number;
@@ -119,6 +126,7 @@ type MonthDetail = {
   agent_actions: {
     step: number;
     action: string;
+    skill_name?: string | null;
     symbols: string[];
     question: string;
     rationale: string;
@@ -126,6 +134,8 @@ type MonthDetail = {
     status: string;
   }[];
   agent_observations: unknown[];
+  skill_executions: unknown[];
+  deterministic_inferences: unknown[];
   traces: unknown[];
 };
 type Dataset = { path: string; dataset_version: string; profile: string };
@@ -298,9 +308,9 @@ export function Dashboard() {
   const outcome = detail?.outcomes.find(
     (item) => item.projection_id === detail.decision.accepted_projection_id,
   );
-  const reconciliation = detail?.forecast_reconciliations.find(
+  const reconciliation = detail?.forecast_reconciliations?.find(
     (item) => item.reconciliation_id === detail.decision.forecast_reconciliation_id,
-  ) ?? detail?.forecast_reconciliations.at(-1);
+  ) ?? detail?.forecast_reconciliations?.at(-1);
   const stockOutcomeByForecast = new Map(
     (detail?.stock_forecast_outcomes ?? []).map((item) => [item.source_forecast_id, item]),
   );
@@ -364,10 +374,12 @@ export function Dashboard() {
                 <span className="pill">{run.forecast_quality.matured_forecasts} matured company forecasts</span>
               </div>
               <div className="qualityGrid">
-                <div><span>Standalone MAE</span><strong>{formatPercent(run.forecast_quality.standalone_mae ?? 0)}</strong></div>
-                <div><span>Reconciled MAE</span><strong>{formatPercent(run.forecast_quality.reconciled_mae ?? 0)}</strong></div>
-                <div><span>Standalone direction</span><strong>{formatPercent(run.forecast_quality.standalone_directional_accuracy ?? 0)}</strong></div>
-                <div><span>Reconciled direction</span><strong>{formatPercent(run.forecast_quality.reconciled_directional_accuracy ?? 0)}</strong></div>
+                <div><span>Deterministic MAE</span><strong>{formatPercent(run.forecast_quality.deterministic_mae ?? 0)}</strong></div>
+                <div><span>Standalone LLM MAE</span><strong>{formatPercent(run.forecast_quality.standalone_mae ?? 0)}</strong></div>
+                <div><span>Dynamic agent MAE</span><strong>{formatPercent(run.forecast_quality.dynamic_agent_mae ?? 0)}</strong></div>
+                <div><span>Final hybrid MAE</span><strong>{formatPercent(run.forecast_quality.reconciled_mae ?? 0)}</strong></div>
+                <div><span>Deterministic direction</span><strong>{formatPercent(run.forecast_quality.deterministic_directional_accuracy ?? 0)}</strong></div>
+                <div><span>Final hybrid direction</span><strong>{formatPercent(run.forecast_quality.reconciled_directional_accuracy ?? 0)}</strong></div>
               </div>
             </section>
           ) : null}
@@ -411,17 +423,22 @@ export function Dashboard() {
                 <span className="eyebrow">DECIDE → ACT → OBSERVE → REVISE</span>
                 <h2>Forecasting agent trace</h2>
               </div>
-              <span className="pill">{detail?.agent_actions.length ?? 0} decisions</span>
+              <span className="pill">
+                {detail?.skill_executions?.length ?? 0} skills · {detail?.agent_actions?.length ?? 0} decisions
+              </span>
             </div>
-            {(detail?.agent_actions.length ?? 0) === 0 ? (
+            {(detail?.agent_actions?.length ?? 0) === 0 ? (
               <div className="empty">This older run predates the dynamic forecasting agent.</div>
             ) : (
               <div className="actionTimeline">
-                {detail?.agent_actions.map((action) => (
+                {detail?.agent_actions?.map((action) => (
                   <article key={`${action.step}-${action.action}`}>
                     <b>{String(action.step + 1).padStart(2, "0")}</b>
                     <div>
-                      <span>{action.action.replaceAll("_", " ")}</span>
+                      <span>
+                        {action.action.replaceAll("_", " ")}
+                        {action.skill_name ? ` · ${action.skill_name}` : ""}
+                      </span>
                       <p>{action.question}</p>
                       <small>
                         {action.symbols.length ? `${action.symbols.join(", ")} · ` : ""}
@@ -458,8 +475,10 @@ export function Dashboard() {
                       <tr>
                         <th>Rank</th>
                         <th>Company</th>
-                        <th>Standalone</th>
-                        <th>Reconciled</th>
+                        <th>Deterministic</th>
+                        <th>Standalone LLM</th>
+                        <th>Dynamic agent</th>
+                        <th>Final hybrid</th>
                         <th>Bear / bull</th>
                         <th>Confidence</th>
                         <th>Realized</th>
@@ -474,7 +493,9 @@ export function Dashboard() {
                             <tr key={forecast.symbol}>
                               <td>{forecast.relative_rank}</td>
                               <td><strong>{forecast.symbol}</strong></td>
+                              <td>{formatPercent(forecast.deterministic_expected_return_3m ?? forecast.raw_expected_return_3m)}</td>
                               <td>{formatPercent(forecast.raw_expected_return_3m)}</td>
+                              <td>{formatPercent(forecast.agent_expected_return_3m ?? forecast.expected_return_3m)}</td>
                               <td>{formatPercent(forecast.expected_return_3m)}</td>
                               <td>
                                 {formatPercent(forecast.bear_case_return)} / {formatPercent(forecast.bull_case_return)}

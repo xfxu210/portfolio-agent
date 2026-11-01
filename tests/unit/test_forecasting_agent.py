@@ -53,19 +53,39 @@ def test_forecasting_agent_dynamically_researches_and_reconciles_every_symbol(tm
     assert [forecast.relative_rank for forecast in result.reconciliation.forecasts] == list(
         range(1, len(shortlist) + 1)
     )
+    assert all(
+        forecast.deterministic_expected_return_3m is not None
+        and forecast.agent_expected_return_3m is not None
+        and 0.25 <= (forecast.agent_blend_weight or 0) <= 0.75
+        and "runtime_hybrid_blend" in forecast.consistency_flags
+        for forecast in result.reconciliation.forecasts
+    )
     actions = [item["action"] for item in result.actions]
     assert actions == [
-        "inspect_market_regime",
-        "inspect_peer_context",
-        "inspect_calibration",
-        "inspect_company_history",
+        "execute_skill",
+        "execute_skill",
+        "execute_skill",
+        "execute_skill",
         "revise_forecasts",
         "reconcile_forecasts",
         "finish",
     ]
+    assert [item["skill_name"] for item in result.actions[:4]] == [
+        "market-regime",
+        "company-deep-dive",
+        "forecast-calibration",
+        "peer-relative-value",
+    ]
     assert len(_read_jsonl(tmp_path / "forecast_reconciliations.jsonl")) == 1
     assert len(_read_jsonl(tmp_path / "agent_observations.jsonl")) == 6
+    assert len(_read_jsonl(tmp_path / "skill_executions.jsonl")) == 4
+    assert len(_read_jsonl(tmp_path / "deterministic_inferences.jsonl")) == len(shortlist)
     assert len(_read_jsonl(tmp_path / "stock_forecasts.jsonl")) == len(shortlist) + 2
+    assert set(result.deterministic_inferences) == set(shortlist)
+    assert all(
+        inference["data_coverage"] == 1.0
+        for inference in result.deterministic_inferences.values()
+    )
 
 
 def test_research_forecast_receives_the_generated_company_analysis(tmp_path) -> None:
@@ -87,6 +107,30 @@ def test_research_forecast_receives_the_generated_company_analysis(tmp_path) -> 
     assert provider.contexts["stock_forecast"]["company_analysis"]["analysis_id"] == (
         analysis.analysis_id
     )
+
+
+def test_skill_tools_use_news_fundamentals_market_prices_and_portfolio() -> None:
+    store = DatasetStore.load(Path("examples/smoke"))
+    signals = build_signal_table(store, date(2025, 1, 2), research_blend=0.5)
+    tools = ForecastingTools(store, signals)
+    symbols = tuple(signals["symbol"].head(3))
+    priors = {
+        symbol: float(signals.set_index("symbol").loc[symbol, "momentum"]) * 0.25
+        for symbol in symbols
+    }
+
+    inference = tools.deterministic_inference(date(2025, 1, 2), symbols, priors)
+    portfolio = tools.portfolio_context(symbols, {})
+
+    assert set(inference) == set(symbols)
+    assert all(set(item["data_channels"]) == {
+        "prices",
+        "news",
+        "fundamentals",
+        "market_and_factors",
+    } for item in inference.values())
+    assert portfolio["baseline_holdings"]
+    assert set(portfolio["targets"]) == set(symbols)
 
 
 def test_calibration_learns_regularized_mapping_from_matured_forecasts_only() -> None:

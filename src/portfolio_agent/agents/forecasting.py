@@ -12,6 +12,7 @@ import pandas as pd
 
 from portfolio_agent.agents.providers.base import LLMProvider, ProviderError
 from portfolio_agent.agents.research import ResearchService
+from portfolio_agent.agents.skills import AgentSkill, SkillRegistry
 from portfolio_agent.config import ReasoningConfig
 from portfolio_agent.data.loader import DatasetStore
 from portfolio_agent.domain.schemas import (
@@ -30,10 +31,21 @@ class ForecastingResult:
     reconciliation: ForecastReconciliation
     actions: tuple[dict[str, Any], ...]
     observations: tuple[dict[str, Any], ...]
+    deterministic_inferences: dict[str, dict[str, Any]]
 
 
 class ForecastingTools:
     """Point-in-time deterministic tools available to the forecasting agent."""
+
+    AVAILABLE_TOOLS = {
+        "market_regime",
+        "company_history",
+        "peer_context",
+        "calibration",
+        "news_context",
+        "fundamentals_context",
+        "portfolio_context",
+    }
 
     def __init__(self, store: DatasetStore, signals: pd.DataFrame) -> None:
         self.store = store
@@ -137,6 +149,222 @@ class ForecastingTools:
             }
         return result
 
+    def news_context(self, day: date, symbols: tuple[str, ...]) -> dict[str, Any]:
+        """Summarize every available event while returning a bounded recent evidence window."""
+
+        frame = self.store.research_as_of(day, list(symbols))
+        result: dict[str, Any] = {}
+        for symbol in symbols:
+            company = frame[
+                frame["symbols"].map(lambda values, target=symbol: target in values)
+            ].copy()
+            if company.empty:
+                result[symbol] = {
+                    "available_records": 0,
+                    "unique_events": 0,
+                    "event_type_counts": {},
+                    "recent_items": [],
+                }
+                continue
+            event_keys = company["event_id"].fillna(company["record_id"])
+            deduplicated = company.loc[~event_keys.duplicated(keep="last")]
+            event_counts = {
+                str(name): int(count)
+                for name, count in company["event_type"]
+                .fillna("unspecified")
+                .value_counts()
+                .items()
+            }
+            recent = deduplicated.tail(12)
+            result[symbol] = {
+                "available_records": int(len(company)),
+                "unique_events": int(len(deduplicated)),
+                "event_type_counts": event_counts,
+                "coverage_start": company["published_at"].min().isoformat(),
+                "coverage_end": company["published_at"].max().isoformat(),
+                "recent_items": [
+                    {
+                        "evidence_id": row.record_id,
+                        "title": row.title,
+                        "summary": row.summary,
+                        "event_type": row.event_type,
+                        "published_at": row.published_at.isoformat(),
+                        "source_id": row.source_id,
+                    }
+                    for row in recent.itertuples()
+                ],
+            }
+        return result
+
+    def fundamentals_context(self, day: date, symbols: tuple[str, ...]) -> dict[str, Any]:
+        """Return point-in-time fundamental histories and deterministic change calculations."""
+
+        frame = self.store.fundamentals_as_of(day, list(symbols))
+        result: dict[str, Any] = {}
+        for symbol in symbols:
+            company = frame[frame["symbol"] == symbol]
+            metrics: dict[str, Any] = {}
+            for metric, history in company.groupby("metric", sort=True):
+                ordered = history.sort_values(["period_end", "available_at"]).tail(8)
+                values = ordered["value"].astype(float).tolist()
+                latest = values[-1]
+                previous = values[-2] if len(values) >= 2 else None
+                change = latest - previous if previous is not None else None
+                metrics[str(metric)] = {
+                    "latest": latest,
+                    "previous": previous,
+                    "absolute_change": change,
+                    "unit": str(ordered.iloc[-1]["unit"]),
+                    "period_end": ordered.iloc[-1]["period_end"].isoformat(),
+                    "available_at": ordered.iloc[-1]["available_at"].isoformat(),
+                    "observations": [
+                        {
+                            "value": float(row.value),
+                            "period_end": row.period_end.isoformat(),
+                            "available_at": row.available_at.isoformat(),
+                            "source_id": row.source_id,
+                            "data_revision": row.data_revision,
+                        }
+                        for row in ordered.itertuples()
+                    ],
+                }
+            result[symbol] = {
+                "available_records": int(len(company)),
+                "metric_count": len(metrics),
+                "metrics": metrics,
+            }
+        return result
+
+    def portfolio_context(
+        self,
+        symbols: tuple[str, ...],
+        current_weights: dict[str, float],
+    ) -> dict[str, Any]:
+        sectors = self.store.universe.set_index("symbol")["sector"].astype(str)
+        baseline = {
+            holding.symbol: holding.weight for holding in self.store.initial_portfolio.holdings
+        }
+        current_sector: dict[str, float] = {}
+        baseline_sector: dict[str, float] = {}
+        for symbol, weight in current_weights.items():
+            sector = sectors.get(symbol, "unknown")
+            current_sector[sector] = current_sector.get(sector, 0.0) + float(weight)
+        for symbol, weight in baseline.items():
+            sector = sectors.get(symbol, "unknown")
+            baseline_sector[sector] = baseline_sector.get(sector, 0.0) + float(weight)
+        return {
+            "current_holdings": current_weights,
+            "baseline_holdings": baseline,
+            "current_sector_exposure": current_sector,
+            "baseline_sector_exposure": baseline_sector,
+            "targets": {
+                symbol: {
+                    "sector": sectors.get(symbol, "unknown"),
+                    "current_weight": float(current_weights.get(symbol, 0.0)),
+                    "baseline_weight": float(baseline.get(symbol, 0.0)),
+                    "rank_score": (
+                        float(self.signals.loc[symbol, "rank_score"])
+                        if symbol in self.signals.index
+                        else None
+                    ),
+                }
+                for symbol in symbols
+            },
+        }
+
+    def deterministic_inference(
+        self,
+        day: date,
+        symbols: tuple[str, ...],
+        priors: dict[str, float],
+    ) -> dict[str, dict[str, Any]]:
+        """Create a stable evidence-layer inference before any dynamic LLM actions."""
+
+        market = self.market_regime(day)
+        history = self.company_history(day, symbols)
+        news = self.news_context(day, symbols)
+        fundamentals = self.fundamentals_context(day, symbols)
+        market_anchor = float(market.get("benchmark_return_63d") or 0.0)
+        result: dict[str, dict[str, Any]] = {}
+        for symbol in symbols:
+            row = self.signals.loc[symbol]
+            prior = float(priors[symbol])
+            research_component = float(np.tanh(float(row["research_score"])) * 0.02)
+            relative_component = float(np.tanh(float(row["quant_score"])) * 0.015)
+            expected = float(
+                np.clip(
+                    0.55 * prior
+                    + 0.20 * market_anchor
+                    + research_component
+                    + relative_component,
+                    -1.0,
+                    3.0,
+                )
+            )
+            data_channels = {
+                "prices": history[symbol]["return_126d"] is not None,
+                "news": news[symbol]["available_records"] > 0,
+                "fundamentals": fundamentals[symbol]["available_records"] > 0,
+                "market_and_factors": market.get("benchmark_return_63d") is not None,
+            }
+            result[symbol] = {
+                "symbol": symbol,
+                "expected_return_3m": expected,
+                "components": {
+                    "momentum_prior": prior,
+                    "market_anchor": market_anchor,
+                    "research_component": research_component,
+                    "relative_quant_component": relative_component,
+                },
+                "signal_snapshot": {
+                    "momentum": float(row["momentum"]),
+                    "annualized_volatility": float(row["annualized_volatility"]),
+                    "quant_score": float(row["quant_score"]),
+                    "research_score": float(row["research_score"]),
+                    "research_count": int(row["research_count"]),
+                    "rank_score": float(row["rank_score"]),
+                },
+                "data_channels": data_channels,
+                "data_coverage": float(np.mean(list(data_channels.values()))),
+                "market_regime": market["regime"],
+                "news_unique_events": news[symbol]["unique_events"],
+                "fundamental_metric_count": fundamentals[symbol]["metric_count"],
+            }
+        return result
+
+    def execute_skill(
+        self,
+        skill: AgentSkill,
+        day: date,
+        symbols: tuple[str, ...],
+        matured_feedback: list[dict[str, Any]],
+        current_weights: dict[str, float],
+    ) -> dict[str, Any]:
+        results: dict[str, Any] = {}
+        for tool in skill.tools:
+            if tool == "market_regime":
+                results[tool] = self.market_regime(day)
+            elif tool == "company_history":
+                results[tool] = self.company_history(day, symbols)
+            elif tool == "peer_context":
+                results[tool] = self.peer_context(symbols)
+            elif tool == "calibration":
+                results[tool] = self.calibration(matured_feedback)
+            elif tool == "news_context":
+                results[tool] = self.news_context(day, symbols)
+            elif tool == "fundamentals_context":
+                results[tool] = self.fundamentals_context(day, symbols)
+            elif tool == "portfolio_context":
+                results[tool] = self.portfolio_context(symbols, current_weights)
+            else:
+                raise ValueError(f"unsupported skill tool: {tool}")
+        return {
+            "skill_name": skill.name,
+            "skill_version": skill.version,
+            "playbook": skill.instructions,
+            "tool_results": results,
+        }
+
     @staticmethod
     def calibration(feedback: list[dict[str, Any]]) -> dict[str, Any]:
         if not feedback:
@@ -224,6 +452,9 @@ class ForecastingAgent:
     """Bounded decide-act-observe agent that owns monthly return forecasting."""
 
     ACTIONS = {
+        ForecastAction.EXECUTE_SKILL: (
+            "Load a specialized research playbook and execute only its allowlisted tools."
+        ),
         ForecastAction.INSPECT_MARKET_REGIME: (
             "Inspect benchmark, factors, volatility, and drawdown available at the cutoff."
         ),
@@ -252,12 +483,15 @@ class ForecastingAgent:
         research: ResearchService,
         reasoning: ReasoningConfig,
         append: Callable[[str, Any], str],
+        skill_registry: SkillRegistry | None = None,
     ) -> None:
         self.store = store
         self.provider = provider
         self.research = research
         self.reasoning = reasoning
         self.append = append
+        self.skills = skill_registry or SkillRegistry()
+        self.skills.validate_tools(ForecastingTools.AVAILABLE_TOOLS)
 
     def _record_result(self, task: str, request_id: str, result: Any, day: date) -> None:
         self.append(
@@ -315,6 +549,7 @@ class ForecastingAgent:
         forecasts: dict[str, StockForecast],
         observations: list[dict[str, Any]],
         reconciliation: ForecastReconciliation | None,
+        deterministic_inferences: dict[str, dict[str, Any]],
     ) -> ForecastAgentDecision:
         context = {
             "decision_as_of": self.store.cutoff(day).isoformat(),
@@ -326,6 +561,8 @@ class ForecastingAgent:
             "max_steps": self.reasoning.max_steps,
             "shortlist": shortlist,
             "available_actions": {key.value: value for key, value in self.ACTIONS.items()},
+            "skill_catalog": self.skills.catalog(),
+            "deterministic_inferences": deterministic_inferences,
             "current_forecasts": self._forecast_state(analyses, forecasts),
             "observations": observations,
             "has_reconciliation": reconciliation is not None,
@@ -333,9 +570,10 @@ class ForecastingAgent:
                 reconciliation.model_dump(mode="json") if reconciliation is not None else None
             ),
             "instruction": (
-                "Choose the single action with the highest expected information gain. Inspect or "
-                "revise only when it could materially change a forecast. Reconcile all symbols "
-                "before finishing."
+                "Choose the single action with the highest expected information gain. Prefer "
+                "execute_skill when a specialized playbook can resolve material uncertainty. "
+                "Inspect or revise only when it could change a decision. Reconcile all symbols "
+                "before finishing. Do not repeat equivalent research."
             ),
         }
         request_id = f"forecast-agent:{day}:{step}"
@@ -354,6 +592,17 @@ class ForecastingAgent:
             else 5
         )
         valid_symbols = valid_symbols[:limit]
+        if value.action == ForecastAction.EXECUTE_SKILL:
+            try:
+                skill = self.skills.get(value.skill_name or "")
+            except ValueError as exc:
+                raise ProviderError("unknown_skill", str(exc)) from exc
+            if skill.target_scope == "company" and not valid_symbols:
+                valid_symbols = (shortlist[0],)
+            elif skill.target_scope == "portfolio" and not valid_symbols:
+                valid_symbols = tuple(shortlist[:5])
+            elif skill.target_scope in {"global", "cross_section"}:
+                valid_symbols = ()
         guarded = valid_symbols != value.symbols
         if guarded:
             if not valid_symbols and value.action in {
@@ -381,7 +630,9 @@ class ForecastingAgent:
         priors: dict[str, float],
         observations: list[dict[str, Any]],
         version: int,
+        deterministic_inferences: dict[str, dict[str, Any]],
     ) -> ForecastReconciliation:
+        reconciliation_skill = self.skills.get("cross-sectional-reconciliation")
         context = {
             "decision_as_of": self.store.cutoff(day).isoformat(),
             "objective": (
@@ -390,10 +641,13 @@ class ForecastingAgent:
                 "cross-sectional dispersion. Return every supplied symbol exactly once."
             ),
             "quant_priors": priors,
+            "deterministic_inferences": deterministic_inferences,
             "company_forecasts": self._forecast_state(
                 analyses, forecasts, detailed=True
             ),
             "tool_observations": observations,
+            "skill": reconciliation_skill.catalog_entry(),
+            "skill_instructions": reconciliation_skill.instructions,
             "required_symbols": sorted(forecasts),
         }
         request_id = f"forecast-reconciliation:{day}:{version}"
@@ -413,16 +667,51 @@ class ForecastingAgent:
                 f"reconciliation symbols differ: expected {sorted(expected_symbols)}, "
                 f"received {sorted(actual_symbols)}",
             )
-        reconciled_items = tuple(
-            item.model_copy(
-                update={
-                    "source_forecast_id": forecasts[item.symbol].forecast_id,
-                    "raw_expected_return_3m": forecasts[item.symbol].expected_return_3m,
-                }
+        reconciled_items: list[Any] = []
+        for item in value.forecasts:
+            agent_expected = float(item.expected_return_3m)
+            deterministic_expected = float(
+                deterministic_inferences[item.symbol]["expected_return_3m"]
             )
-            for item in value.forecasts
+            agent_weight = float(
+                np.clip(0.25 + 0.5 * item.confidence * value.confidence, 0.25, 0.75)
+            )
+            hybrid_expected = float(
+                np.clip(
+                    agent_weight * agent_expected
+                    + (1 - agent_weight) * deterministic_expected,
+                    -1.0,
+                    3.0,
+                )
+            )
+            reconciled_items.append(
+                item.model_copy(
+                    update={
+                        "source_forecast_id": forecasts[item.symbol].forecast_id,
+                        "raw_expected_return_3m": forecasts[item.symbol].expected_return_3m,
+                        "deterministic_expected_return_3m": deterministic_expected,
+                        "agent_expected_return_3m": agent_expected,
+                        "agent_blend_weight": agent_weight,
+                        "expected_return_3m": hybrid_expected,
+                        "bear_case_return": min(item.bear_case_return, hybrid_expected),
+                        "bull_case_return": max(item.bull_case_return, hybrid_expected),
+                        "adjustment_rationale": (
+                            f"{item.adjustment_rationale} Runtime hybridized the dynamic agent "
+                            f"estimate with the deterministic all-data inference at agent weight "
+                            f"{agent_weight:.3f}."
+                        ),
+                        "consistency_flags": tuple(
+                            dict.fromkeys((*item.consistency_flags, "runtime_hybrid_blend"))
+                        ),
+                    }
+                )
+            )
+        reconciled_items.sort(key=lambda item: (-item.expected_return_3m, item.symbol))
+        ranked_items = tuple(
+            item.model_copy(update={"relative_rank": rank})
+            for rank, item in enumerate(reconciled_items, start=1)
         )
-        value = value.model_copy(update={"forecasts": reconciled_items})
+        value = value.model_copy(update={"forecasts": ranked_items})
         if value.decision_as_of != self.store.cutoff(day):
             raise ProviderError(
                 "provenance_mismatch", "reconciliation decision date does not match the cutoff"
@@ -442,19 +731,40 @@ class ForecastingAgent:
         priors: dict[str, float],
         signals: pd.DataFrame,
         matured_feedback: list[dict[str, Any]],
+        current_weights: dict[str, float] | None = None,
     ) -> ForecastingResult:
+        current_weights = current_weights or {
+            holding.symbol: holding.weight for holding in self.store.initial_portfolio.holdings
+        }
+        tools = ForecastingTools(self.store, signals)
+        deterministic_inferences = tools.deterministic_inference(
+            day, tuple(shortlist), priors
+        )
+        for inference in deterministic_inferences.values():
+            self.append(
+                "deterministic_inferences.jsonl",
+                {
+                    "month_id": day.isoformat(),
+                    "decision_as_of": self.store.cutoff(day).isoformat(),
+                    **inference,
+                },
+            )
+        company_skill = self.skills.get("company-deep-dive")
         analyses: dict[str, CompanyAnalysis] = {}
         forecasts: dict[str, StockForecast] = {}
         for symbol in shortlist:
             analysis, forecast = self.research.analyze_and_forecast(
-                day, symbol, float(priors[symbol])
+                day,
+                symbol,
+                float(priors[symbol]),
+                deterministic_context=deterministic_inferences[symbol],
+                skill_instructions=company_skill.instructions,
             )
             analyses[symbol] = analysis
             forecasts[symbol] = forecast
             self.append("company_analysis.jsonl", analysis)
             self.append("stock_forecasts.jsonl", forecast)
 
-        tools = ForecastingTools(self.store, signals)
         observations: list[dict[str, Any]] = []
         actions: list[dict[str, Any]] = []
         signatures: set[tuple[str, tuple[str, ...], str]] = set()
@@ -464,7 +774,14 @@ class ForecastingAgent:
 
         for step in range(self.reasoning.max_steps):
             decision = self._decide(
-                day, step, shortlist, analyses, forecasts, observations, reconciliation
+                day,
+                step,
+                shortlist,
+                analyses,
+                forecasts,
+                observations,
+                reconciliation,
+                deterministic_inferences,
             )
             action_record = {
                 "month_id": day.isoformat(),
@@ -477,7 +794,11 @@ class ForecastingAgent:
                 if decision.action == ForecastAction.REVISE_FORECASTS
                 else ""
             )
-            signature = (decision.action.value, decision.symbols, signature_question)
+            signature = (
+                f"{decision.action.value}:{decision.skill_name or ''}",
+                decision.symbols,
+                signature_question,
+            )
             if signature in signatures:
                 action_record["status"] = "stopped_duplicate_action"
                 actions.append(action_record)
@@ -488,7 +809,25 @@ class ForecastingAgent:
             self.append("agent_actions.jsonl", action_record)
 
             observation: dict[str, Any] | None = None
-            if decision.action == ForecastAction.INSPECT_MARKET_REGIME:
+            if decision.action == ForecastAction.EXECUTE_SKILL:
+                skill = self.skills.get(decision.skill_name or "")
+                observation = tools.execute_skill(
+                    skill,
+                    day,
+                    decision.symbols,
+                    matured_feedback,
+                    current_weights,
+                )
+                self.append(
+                    "skill_executions.jsonl",
+                    {
+                        "month_id": day.isoformat(),
+                        "step": step,
+                        "question": decision.question,
+                        **observation,
+                    },
+                )
+            elif decision.action == ForecastAction.INSPECT_MARKET_REGIME:
                 observation = tools.market_regime(day)
             elif decision.action == ForecastAction.INSPECT_PEER_CONTEXT:
                 observation = tools.peer_context(decision.symbols)
@@ -505,6 +844,8 @@ class ForecastingAgent:
                         "prior_analysis": analyses[symbol].model_dump(mode="json"),
                         "prior_forecast": forecasts[symbol].model_dump(mode="json"),
                         "tool_observations": observations,
+                        "deterministic_inference": deterministic_inferences[symbol],
+                        "available_skills": self.skills.catalog(),
                         "instruction": (
                             "Reconsider the forecast only if the new evidence changes the "
                             "estimate; explicitly preserve uncertainty and avoid false precision."
@@ -516,6 +857,8 @@ class ForecastingAgent:
                         float(priors[symbol]),
                         focus_context=focus,
                         revision=revisions[symbol],
+                        deterministic_context=deterministic_inferences[symbol],
+                        skill_instructions=company_skill.instructions,
                     )
                     analyses[symbol] = analysis
                     forecasts[symbol] = forecast
@@ -538,6 +881,7 @@ class ForecastingAgent:
                     priors,
                     observations,
                     reconciliation_version,
+                    deterministic_inferences,
                 )
                 observation = {
                     "reconciliation_id": reconciliation.reconciliation_id,
@@ -579,6 +923,7 @@ class ForecastingAgent:
                 priors,
                 observations,
                 reconciliation_version,
+                deterministic_inferences,
             )
             forced = {
                 "month_id": day.isoformat(),
@@ -599,4 +944,5 @@ class ForecastingAgent:
             reconciliation=reconciliation,
             actions=tuple(actions),
             observations=tuple(observations),
+            deterministic_inferences=deterministic_inferences,
         )

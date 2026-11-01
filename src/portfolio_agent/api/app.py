@@ -241,6 +241,16 @@ def get_month(run_id: str, month_id: str) -> dict:
             for item in _read_jsonl(root / "agent_observations.jsonl")
             if item.get("month_id") == month_id
         ],
+        "skill_executions": [
+            item
+            for item in _read_jsonl(root / "skill_executions.jsonl")
+            if item.get("month_id") == month_id
+        ],
+        "deterministic_inferences": [
+            item
+            for item in _read_jsonl(root / "deterministic_inferences.jsonl")
+            if item.get("month_id") == month_id
+        ],
         "traces": [
             item
             for item in _read_jsonl(root / "traces.jsonl")

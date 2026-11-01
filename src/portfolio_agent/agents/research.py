@@ -51,6 +51,8 @@ class ResearchService:
         *,
         focus_context: dict[str, Any] | None = None,
         revision: int = 0,
+        deterministic_context: dict[str, Any] | None = None,
+        skill_instructions: str | None = None,
     ) -> tuple[CompanyAnalysis, StockForecast]:
         evidence = self.store.research_as_of(day, [symbol]).tail(8)
         fundamentals = self.store.fundamentals_as_of(day, [symbol]).tail(8)
@@ -90,6 +92,10 @@ class ResearchService:
             ],
             "warning": "Retrospective historical simulation; use only supplied evidence.",
         }
+        if deterministic_context is not None:
+            context["deterministic_inference"] = deterministic_context
+        if skill_instructions is not None:
+            context["skill_instructions"] = skill_instructions
         if focus_context:
             context["agent_focus"] = focus_context
         context_hash = json.dumps(context, sort_keys=True, default=str)

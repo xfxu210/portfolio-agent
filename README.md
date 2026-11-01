@@ -2,8 +2,10 @@
 
 Portfolio Agent is an auditable, point-in-time portfolio research and optimization agent.
 It replays monthly decisions over an immutable offline dataset. A selected language model runs a
-bounded decide-act-observe loop, chooses which forecasting questions and tools to pursue, revises
-uncertain company estimates, and reconciles the complete eligible-company forecast cross-section.
+bounded decide-act-observe loop, loads specialized forecasting skills, chooses which tools and
+questions to pursue, revises uncertain company estimates, and reconciles the complete
+eligible-company forecast cross-section. A deterministic evidence layer consumes every available
+data modality before the dynamic model acts.
 Portfolio constraints, optimization, accounting, projections, and artifact validation remain
 deterministic.
 
@@ -17,8 +19,10 @@ runtime financial-data service.
 
 - A fixed formation universe is filtered by historical eligibility at every decision.
 - Research and fundamentals require `available_at <= decision_as_of`.
-- The forecasting model dynamically chooses market, peer, company-history, calibration, revision,
-  reconciliation, or stop actions under explicit step and call budgets.
+- A stable evidence layer combines point-in-time prices, benchmark, factors, news, fundamentals,
+  universe metadata, and portfolio state into reproducible company inferences.
+- The forecasting model dynamically loads versioned market, company, peer, calibration, and
+  portfolio skills and executes only their allowlisted tools under explicit budgets.
 - Every eligible company forecast is reconciled against all others before portfolio construction.
 - Standalone and reconciled forecast accuracy are measured after the full 63-session horizon.
 - Exactly ten long-only holdings are optimized under weight and turnover constraints.
@@ -102,7 +106,8 @@ The public runtime consumes a validated snapshot and never extracts private fina
 The separate private preparation workspace owns source inventory, rights decisions,
 normalization, synthetic-full generation, validation, and optional Hugging Face publication.
 See [methodology](docs/methodology.md), [dataset contract](docs/dataset-contract.md),
-[licensing](docs/data-licensing.md), and [limitations](docs/limitations.md).
+[agent skills](docs/agent-skills.md), [licensing](docs/data-licensing.md), and
+[limitations](docs/limitations.md).
 
 ## Verification
 

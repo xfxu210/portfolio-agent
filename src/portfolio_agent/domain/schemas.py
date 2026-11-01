@@ -199,6 +199,7 @@ class StockForecast(StrictModel):
 class ForecastAction(StrEnum):
     """Bounded actions available to the monthly forecasting agent."""
 
+    EXECUTE_SKILL = "execute_skill"
     INSPECT_MARKET_REGIME = "inspect_market_regime"
     INSPECT_PEER_CONTEXT = "inspect_peer_context"
     INSPECT_COMPANY_HISTORY = "inspect_company_history"
@@ -211,6 +212,7 @@ class ForecastAction(StrEnum):
 class ForecastAgentDecision(StrictModel):
     schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
     action: ForecastAction
+    skill_name: str | None = None
     symbols: tuple[str, ...] = ()
     question: str = Field(min_length=1)
     rationale: str = Field(min_length=1)
@@ -227,6 +229,10 @@ class ForecastAgentDecision(StrictModel):
             raise ValueError(f"{self.action} requires at least one symbol")
         if len(self.symbols) > 5 or len(set(self.symbols)) != len(self.symbols):
             raise ValueError("symbols must be unique and contain at most five targets")
+        if self.action == ForecastAction.EXECUTE_SKILL and not self.skill_name:
+            raise ValueError("execute_skill requires skill_name")
+        if self.action != ForecastAction.EXECUTE_SKILL and self.skill_name is not None:
+            raise ValueError("skill_name is accepted only for execute_skill")
         if self.action in {
             ForecastAction.INSPECT_MARKET_REGIME,
             ForecastAction.INSPECT_CALIBRATION,
@@ -241,6 +247,11 @@ class ReconciledStockForecast(StrictModel):
     symbol: str = Field(min_length=1)
     source_forecast_id: str = Field(min_length=1)
     raw_expected_return_3m: FiniteFloat = Field(ge=-1.0, le=3.0)
+    deterministic_expected_return_3m: FiniteFloat | None = Field(
+        default=None, ge=-1.0, le=3.0
+    )
+    agent_expected_return_3m: FiniteFloat | None = Field(default=None, ge=-1.0, le=3.0)
+    agent_blend_weight: Weight | None = None
     expected_return_3m: FiniteFloat = Field(ge=-1.0, le=3.0)
     confidence: Confidence
     relative_rank: int = Field(ge=1)

@@ -64,12 +64,17 @@ class MockProvider:
                 "retrospective_model": True,
             }
         elif response_model is StockForecast:
+            deterministic = context.get("deterministic_inference", {})
             payload = {
                 "forecast_id": f"forecast-{digest[:12]}",
                 "decision_as_of": now,
                 "created_at": now,
                 "symbol": symbol,
-                "expected_return_3m": float(context.get("quant_prior", 0.02)),
+                "expected_return_3m": float(
+                    deterministic.get(
+                        "expected_return_3m", context.get("quant_prior", 0.02)
+                    )
+                ),
                 "confidence": 0.5,
                 "rationale": "Deterministic mock forecast.",
                 "analysis_id": context.get("analysis_id", f"analysis-{digest[:12]}"),
@@ -124,51 +129,64 @@ class MockProvider:
             shortlist = tuple(context.get("shortlist", ()))
             choices = (
                 (
-                    ForecastAction.INSPECT_MARKET_REGIME,
+                    ForecastAction.EXECUTE_SKILL,
+                    "market-regime",
                     (),
                     "What market regime and common-factor backdrop constrain all forecasts?",
                     0.8,
                 ),
                 (
-                    ForecastAction.INSPECT_PEER_CONTEXT,
-                    shortlist[:5],
-                    "Are the highest-priority companies consistent with their sector peers?",
+                    ForecastAction.EXECUTE_SKILL,
+                    "company-deep-dive",
+                    shortlist[:3],
+                    (
+                        "Which decision-relevant companies have contradictory price, news, "
+                        "or fundamental evidence?"
+                    ),
                     0.65,
                 ),
                 (
-                    ForecastAction.INSPECT_CALIBRATION,
+                    ForecastAction.EXECUTE_SKILL,
+                    "forecast-calibration",
                     (),
                     "What bias and error are visible in fully matured prior forecasts?",
                     0.55,
                 ),
                 (
-                    ForecastAction.INSPECT_COMPANY_HISTORY,
-                    shortlist[:3],
-                    "Do recent multi-horizon returns contradict the current forecasts?",
+                    ForecastAction.EXECUTE_SKILL,
+                    "peer-relative-value",
+                    shortlist[:5],
+                    "Are the highest-priority companies consistent with their sector peers?",
                     0.45,
                 ),
                 (
                     ForecastAction.REVISE_FORECASTS,
+                    None,
                     shortlist[:2],
                     "Revisit the most decision-relevant forecasts using the new context.",
                     0.35,
                 ),
                 (
                     ForecastAction.RECONCILE_FORECASTS,
+                    None,
                     (),
                     "Reconcile every company forecast into one coherent cross-section.",
                     0.25,
                 ),
                 (
                     ForecastAction.FINISH,
+                    None,
                     (),
                     "Is the reconciled forecast set complete enough to use?",
                     0.0,
                 ),
             )
-            action, symbols, question, information_gain = choices[min(step, len(choices) - 1)]
+            action, skill_name, symbols, question, information_gain = choices[
+                min(step, len(choices) - 1)
+            ]
             payload = {
                 "action": action,
+                "skill_name": skill_name,
                 "symbols": symbols,
                 "question": question,
                 "rationale": "Deterministic mock policy exercises the bounded agent loop.",
@@ -178,13 +196,20 @@ class MockProvider:
             raw_forecasts = list(context.get("company_forecasts", ()))
             priors = context.get("quant_priors", {})
             observations = context.get("tool_observations", [])
+            skill_results = {
+                str(item.get("result", {}).get("skill_name")): item.get("result", {}).get(
+                    "tool_results", {}
+                )
+                for item in observations
+                if item.get("tool") == ForecastAction.EXECUTE_SKILL
+            }
             market_observation = next(
                 (
                     item.get("result", {})
                     for item in observations
                     if item.get("tool") == ForecastAction.INSPECT_MARKET_REGIME
                 ),
-                {},
+                skill_results.get("market-regime", {}).get("market_regime", {}),
             )
             calibration = next(
                 (
@@ -192,8 +217,9 @@ class MockProvider:
                     for item in observations
                     if item.get("tool") == ForecastAction.INSPECT_CALIBRATION
                 ),
-                {},
+                skill_results.get("forecast-calibration", {}).get("calibration", {}),
             )
+            deterministic = context.get("deterministic_inferences", {})
             market_expected = float(market_observation.get("benchmark_return_63d") or 0.0)
             market_expected = max(-1.0, min(3.0, market_expected))
             error = float(calibration.get("mean_absolute_error") or 0.0)
@@ -211,7 +237,10 @@ class MockProvider:
                 symbol = str(item["symbol"])
                 raw = float(item["expected_return_3m"])
                 prior = float(priors.get(symbol, raw))
-                standalone = 0.75 * raw + 0.25 * prior
+                deterministic_expected = float(
+                    deterministic.get(symbol, {}).get("expected_return_3m", prior)
+                )
+                standalone = 0.55 * raw + 0.30 * deterministic_expected + 0.15 * prior
                 calibrated = calibration_intercept + calibration_slope * standalone
                 adjusted = (
                     (1 - calibration_reliability) * standalone

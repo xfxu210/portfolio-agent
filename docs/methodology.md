@@ -16,13 +16,16 @@ decision close → dynamic research actions → all-company reconciliation
 
 ## Dynamic forecasting agent
 
-Every eligible company first receives a dated, evidence-grounded standalone analysis and return
-forecast. The model then enters a bounded decide-act-observe loop. It may inspect the market regime,
-compare selected companies with sector peers, inspect multi-horizon company history, review only
-fully matured forecast errors, or revisit uncertain company forecasts. Each action is chosen at
-runtime from the current state; it is not a hard-coded sequence in live mode.
+Every eligible company first receives a deterministic inference built from all available data
+modalities and a dated, evidence-grounded standalone LLM analysis and return forecast. The model
+then enters a bounded decide-act-observe loop. It selects load-on-demand skills for market regime,
+company deep dives, peer relative value, calibration, or portfolio awareness. Each skill has a
+versioned playbook and an explicit tool allowlist. The skill sequence is chosen at runtime from the
+current state; it is not a hard-coded sequence in live mode.
 
-Before finishing, the model must jointly reconcile every eligible company forecast. The resulting
+Before finishing, the model must load the mandatory reconciliation playbook and jointly reconcile
+the deterministic inference, standalone LLM estimate, revisions, and tool evidence for every
+eligible company. The resulting
 cross-section contains one source-linked estimate per company, contiguous relative ranks, bear and
 bull cases, calibrated confidence, common-factor assumptions, and explicit adjustment rationale.
 Unknown companies, missing forecasts, mismatched forecast IDs, duplicate ranks, and mismatched

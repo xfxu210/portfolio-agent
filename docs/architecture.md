@@ -8,10 +8,13 @@ Validated immutable dataset
           │                                      │
           └────────────────┬─────────────────────┘
                            ▼
+         deterministic all-data inference layer
+                           │
+                           ▼
                  Forecasting agent loop
             ┌──────────────┼──────────────┐
             ▼              ▼              ▼
-       choose action   execute tool   inspect observation
+       choose skill    execute tools  inspect observation
             ▲                              │
             └──────── revise / continue ───┘
                            │
@@ -29,12 +32,16 @@ Validated immutable dataset
                    FastAPI + dashboard
 ```
 
-The model owns the forecasting research policy. At each monthly cutoff it sees the current
-forecast state and decides which bounded action has the highest expected information gain: inspect
-the market regime, compare sector peers, inspect company history, review matured calibration,
-revisit selected companies, reconcile the cross-section, or finish. Actions produce observations
-that become input to the next decision. Duplicate actions, unknown symbols, call budgets, and step
-budgets are enforced by code.
+Before the model acts, deterministic tools consume every point-in-time data modality: universe,
+prices, benchmark, factors, dated articles, reported fundamentals, and portfolio state. They create
+stable company priors, coverage diagnostics, and a market anchor. The same inputs always produce
+the same inference.
+
+The model owns the dynamic forecasting research policy. At each monthly cutoff it sees the stable
+inference, current forecasts, a catalog of versioned skills, and prior observations. It chooses the
+skill or bounded action with the highest expected information gain. Full skill instructions load
+only when selected, and code executes only the tools allowlisted by that skill. Duplicate actions,
+unknown skills or symbols, call budgets, and step budgets are enforced by code.
 
 The agent must reconcile every eligible company's standalone forecast before its output can reach
 portfolio construction. Reconciliation corrects common-factor double counting, relative-value
