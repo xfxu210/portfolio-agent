@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, date, datetime, time
 from typing import Any
 
@@ -42,7 +44,13 @@ class ResearchService:
         )
 
     def analyze_and_forecast(
-        self, day: date, symbol: str, quant_prior: float
+        self,
+        day: date,
+        symbol: str,
+        quant_prior: float,
+        *,
+        focus_context: dict[str, Any] | None = None,
+        revision: int = 0,
     ) -> tuple[CompanyAnalysis, StockForecast]:
         evidence = self.store.research_as_of(day, [symbol]).tail(8)
         fundamentals = self.store.fundamentals_as_of(day, [symbol]).tail(8)
@@ -82,6 +90,8 @@ class ResearchService:
             ],
             "warning": "Retrospective historical simulation; use only supplied evidence.",
         }
+        if focus_context:
+            context["agent_focus"] = focus_context
         context_hash = json.dumps(context, sort_keys=True, default=str)
         analysis_key = (
             "company_analysis",
@@ -91,16 +101,8 @@ class ResearchService:
             symbol,
             context_hash,
         )
-        forecast_key = (
-            "stock_forecast",
-            self.provider.provider,
-            self.provider.model,
-            day,
-            symbol,
-            context_hash,
-        )
         if analysis_key not in self.cache:
-            request_id = f"analysis:{day}:{symbol}"
+            request_id = f"analysis:{day}:{symbol}:r{revision}"
             result = self.provider.generate_structured(
                 task="company_analysis",
                 messages=[{"role": "user", "content": json.dumps(context, default=str)}],
@@ -118,13 +120,37 @@ class ResearchService:
                     "provenance_mismatch",
                     "company analysis symbol/decision_as_of does not match request context",
                 )
+            result = replace(
+                result,
+                value=result.value.model_copy(
+                    update={
+                        "analysis_id": (
+                            f"analysis-{symbol.lower()}-"
+                            f"{hashlib.sha256(context_hash.encode()).hexdigest()[:16]}"
+                        )
+                    }
+                ),
+            )
             self._record("company_analysis", request_id, result, day)
             self.cache[analysis_key] = result.value
         analysis = self.cache[analysis_key]
         assert isinstance(analysis, CompanyAnalysis)
+        forecast_context = {
+            **context,
+            "analysis_id": analysis.analysis_id,
+            "company_analysis": analysis.model_dump(mode="json"),
+        }
+        forecast_hash = json.dumps(forecast_context, sort_keys=True, default=str)
+        forecast_key = (
+            "stock_forecast",
+            self.provider.provider,
+            self.provider.model,
+            day,
+            symbol,
+            forecast_hash,
+        )
         if forecast_key not in self.cache:
-            forecast_context = {**context, "analysis_id": analysis.analysis_id}
-            request_id = f"forecast:{day}:{symbol}"
+            request_id = f"forecast:{day}:{symbol}:r{revision}"
             result = self.provider.generate_structured(
                 task="stock_forecast",
                 messages=[{"role": "user", "content": json.dumps(forecast_context, default=str)}],
@@ -140,12 +166,23 @@ class ResearchService:
             if (
                 result.value.symbol != symbol
                 or result.value.decision_as_of != cutoff
-                or result.value.analysis_id != analysis.analysis_id
             ):
                 raise ProviderError(
                     "provenance_mismatch",
-                    "stock forecast symbol/date/analysis linkage does not match request context",
+                    "stock forecast symbol/date does not match request context",
                 )
+            result = replace(
+                result,
+                value=result.value.model_copy(
+                    update={
+                        "forecast_id": (
+                            f"forecast-{symbol.lower()}-"
+                            f"{hashlib.sha256(forecast_hash.encode()).hexdigest()[:16]}"
+                        ),
+                        "analysis_id": analysis.analysis_id,
+                    }
+                ),
+            )
             self._record("stock_forecast", request_id, result, day)
             self.cache[forecast_key] = result.value
         forecast = self.cache[forecast_key]

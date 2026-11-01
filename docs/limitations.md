@@ -8,7 +8,10 @@
 - The optimizer is sensitive to expected-return and covariance estimation error.
 - A three-year interval is too short to establish broad robustness.
 - Provider outputs and prices may change outside recorded mode.
+- Dynamic tool choice and reconciliation can improve coherence without improving accuracy; compare
+  the reported standalone and reconciled forecast metrics rather than assuming the agent helped.
+- The current evaluation deliberately ignores transaction costs. Portfolio results therefore
+  overstate what a turnover-heavy strategy could retain in practice.
 - The application does not place orders or provide individualized financial advice.
 
 Negative, flat, and inconclusive outcomes are expected and must remain visible.
-

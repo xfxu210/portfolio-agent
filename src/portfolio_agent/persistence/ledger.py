@@ -14,6 +14,10 @@ class SQLiteLedger:
         "model_requests": "traces.jsonl",
         "company_analyses": "company_analysis.jsonl",
         "stock_forecasts": "stock_forecasts.jsonl",
+        "forecast_reconciliations": "forecast_reconciliations.jsonl",
+        "stock_forecast_outcomes": "stock_forecast_outcomes.jsonl",
+        "agent_actions": "agent_actions.jsonl",
+        "agent_observations": "agent_observations.jsonl",
         "projections": "projections.jsonl",
         "forecast_outcomes": "forecast_outcomes.jsonl",
     }

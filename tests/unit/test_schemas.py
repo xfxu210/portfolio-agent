@@ -7,6 +7,7 @@ from portfolio_agent.domain.schemas import (
     ArticleRecord,
     ExperimentProposal,
     ExperimentType,
+    ForecastReconciliation,
     Holding,
     InitialPortfolio,
     PortfolioConstraints,
@@ -59,4 +60,33 @@ def test_experiment_allowlist_rejects_invalid_values(kind, key, value) -> None:
             hypothesis="test",
             overrides={key: value},
             expected_tradeoffs=("none",),
+        )
+
+
+def test_forecast_reconciliation_requires_complete_contiguous_ranks() -> None:
+    with pytest.raises(ValidationError, match="relative ranks"):
+        ForecastReconciliation.model_validate(
+            {
+                "decision_as_of": datetime(2025, 1, 2, 23, 59, 59, tzinfo=UTC),
+                "market_regime": "range_bound",
+                "market_expected_return_3m": 0.02,
+                "common_factor_assumptions": (),
+                "forecasts": tuple(
+                    {
+                        "symbol": symbol,
+                        "source_forecast_id": f"forecast-{symbol}",
+                        "raw_expected_return_3m": 0.01,
+                        "expected_return_3m": 0.01,
+                        "confidence": 0.5,
+                        "relative_rank": 2,
+                        "bear_case_return": -0.05,
+                        "bull_case_return": 0.08,
+                        "adjustment_rationale": "test",
+                    }
+                    for symbol in ("A", "B")
+                ),
+                "cross_sectional_risks": (),
+                "confidence": 0.5,
+                "rationale": "test",
+            }
         )

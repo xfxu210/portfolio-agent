@@ -11,6 +11,9 @@ from portfolio_agent.domain.schemas import (
     CompanyAnalysis,
     ExperimentProposal,
     ExperimentType,
+    ForecastAction,
+    ForecastAgentDecision,
+    ForecastReconciliation,
     StockForecast,
 )
 
@@ -115,6 +118,144 @@ class MockProvider:
                 "evidence_ids": evidence_ids,
                 "overrides": overrides,
                 "expected_tradeoffs": ("May underperform in a different market regime.",),
+            }
+        elif response_model is ForecastAgentDecision:
+            step = int(context.get("step", 0))
+            shortlist = tuple(context.get("shortlist", ()))
+            choices = (
+                (
+                    ForecastAction.INSPECT_MARKET_REGIME,
+                    (),
+                    "What market regime and common-factor backdrop constrain all forecasts?",
+                    0.8,
+                ),
+                (
+                    ForecastAction.INSPECT_PEER_CONTEXT,
+                    shortlist[:5],
+                    "Are the highest-priority companies consistent with their sector peers?",
+                    0.65,
+                ),
+                (
+                    ForecastAction.INSPECT_CALIBRATION,
+                    (),
+                    "What bias and error are visible in fully matured prior forecasts?",
+                    0.55,
+                ),
+                (
+                    ForecastAction.INSPECT_COMPANY_HISTORY,
+                    shortlist[:3],
+                    "Do recent multi-horizon returns contradict the current forecasts?",
+                    0.45,
+                ),
+                (
+                    ForecastAction.REVISE_FORECASTS,
+                    shortlist[:2],
+                    "Revisit the most decision-relevant forecasts using the new context.",
+                    0.35,
+                ),
+                (
+                    ForecastAction.RECONCILE_FORECASTS,
+                    (),
+                    "Reconcile every company forecast into one coherent cross-section.",
+                    0.25,
+                ),
+                (
+                    ForecastAction.FINISH,
+                    (),
+                    "Is the reconciled forecast set complete enough to use?",
+                    0.0,
+                ),
+            )
+            action, symbols, question, information_gain = choices[min(step, len(choices) - 1)]
+            payload = {
+                "action": action,
+                "symbols": symbols,
+                "question": question,
+                "rationale": "Deterministic mock policy exercises the bounded agent loop.",
+                "expected_information_gain": information_gain,
+            }
+        elif response_model is ForecastReconciliation:
+            raw_forecasts = list(context.get("company_forecasts", ()))
+            priors = context.get("quant_priors", {})
+            observations = context.get("tool_observations", [])
+            market_observation = next(
+                (
+                    item.get("result", {})
+                    for item in observations
+                    if item.get("tool") == ForecastAction.INSPECT_MARKET_REGIME
+                ),
+                {},
+            )
+            calibration = next(
+                (
+                    item.get("result", {})
+                    for item in observations
+                    if item.get("tool") == ForecastAction.INSPECT_CALIBRATION
+                ),
+                {},
+            )
+            market_expected = float(market_observation.get("benchmark_return_63d") or 0.0)
+            market_expected = max(-1.0, min(3.0, market_expected))
+            error = float(calibration.get("mean_absolute_error") or 0.0)
+            calibration_intercept = float(
+                calibration.get("standalone_calibration_intercept") or 0.0
+            )
+            calibration_slope = float(
+                calibration.get("standalone_calibration_slope") or 1.0
+            )
+            calibration_reliability = float(
+                calibration.get("calibration_reliability") or 0.0
+            )
+            reconciled = []
+            for item in raw_forecasts:
+                symbol = str(item["symbol"])
+                raw = float(item["expected_return_3m"])
+                prior = float(priors.get(symbol, raw))
+                standalone = 0.75 * raw + 0.25 * prior
+                calibrated = calibration_intercept + calibration_slope * standalone
+                adjusted = (
+                    (1 - calibration_reliability) * standalone
+                    + calibration_reliability * calibrated
+                )
+                adjusted = max(-1.0, min(3.0, adjusted))
+                confidence = max(0.05, min(1.0, float(item["confidence"]) * (1 - error)))
+                reconciled.append(
+                    {
+                        "symbol": symbol,
+                        "source_forecast_id": item["forecast_id"],
+                        "raw_expected_return_3m": raw,
+                        "expected_return_3m": adjusted,
+                        "confidence": confidence,
+                        "bear_case_return": max(-1.0, adjusted - 0.08),
+                        "bull_case_return": min(3.0, adjusted + 0.08),
+                        "adjustment_rationale": (
+                            "Shrink the standalone estimate toward its prior, then apply the "
+                            "regularized intercept and slope learned only from matured forecasts."
+                        ),
+                        "consistency_flags": (),
+                    }
+                )
+            reconciled.sort(key=lambda item: (-item["expected_return_3m"], item["symbol"]))
+            for rank, item in enumerate(reconciled, start=1):
+                item["relative_rank"] = rank
+            payload = {
+                "reconciliation_id": "pending",
+                "decision_as_of": now,
+                "provider": self.provider,
+                "model": self.model,
+                "market_regime": str(market_observation.get("regime", "unclassified")),
+                "market_expected_return_3m": market_expected,
+                "common_factor_assumptions": (
+                    "All company estimates share the observed market-regime component.",
+                ),
+                "forecasts": tuple(reconciled),
+                "cross_sectional_risks": (
+                    "Common synthetic factor exposure can make standalone forecasts correlated.",
+                ),
+                "confidence": max(0.05, min(1.0, 0.6 * (1 - error))),
+                "rationale": (
+                    "Jointly shrink, calibrate, and rank every supplied company forecast."
+                ),
             }
         else:
             raise TypeError(f"mock provider has no fixture for {response_model.__name__}")

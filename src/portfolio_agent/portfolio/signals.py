@@ -68,3 +68,28 @@ def build_signal_table(
             "rank_score": rank.reindex(symbols).values,
         }
     ).sort_values(["rank_score", "symbol"], ascending=[False, True])
+
+
+def blend_reconciled_forecasts(
+    signals: pd.DataFrame,
+    forecast_returns: dict[str, float],
+    *,
+    confidence_scale: float,
+) -> pd.DataFrame:
+    """Blend the reconciled cross-section into the membership ranking."""
+
+    forecast_signal = pd.Series(forecast_returns).reindex(signals["symbol"]).astype(float)
+    if forecast_signal.isna().any():
+        missing = signals.loc[forecast_signal.isna().to_numpy(), "symbol"].tolist()
+        raise ValueError(f"reconciled forecast missing for eligible symbols: {missing}")
+    forecast_std = float(forecast_signal.std(ddof=0))
+    if np.isfinite(forecast_std) and forecast_std > 1e-12:
+        forecast_z = (forecast_signal - float(forecast_signal.mean())) / forecast_std
+    else:
+        forecast_z = pd.Series(0.0, index=forecast_signal.index)
+    blended = signals.copy()
+    blended["rank_score"] = (
+        confidence_scale * forecast_z.to_numpy()
+        + (1 - confidence_scale) * blended["rank_score"].to_numpy()
+    )
+    return blended.sort_values(["rank_score", "symbol"], ascending=[False, True])

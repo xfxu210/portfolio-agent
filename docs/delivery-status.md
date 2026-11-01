@@ -7,17 +7,25 @@ This document separates implemented local deliverables from external publication
 - Strict point-in-time schemas, checksummed Parquet/JSON loading, and a pinned-revision-only
   Hugging Face downloader.
 - Fixed formation universe, dynamic exactly-ten-stock selection, bounded CVXPY allocation,
-  next-session execution, turnover costs, drift, and objective performance metrics.
+  next-session execution, drift, and objective performance metrics. Transaction costs are zero by
+  explicit request in the current forecasting-focused version.
+- A bounded model-controlled decide-act-observe loop with point-in-time market, peer, company
+  history, and calibration tools; selective forecast revision; duplicate and budget stopping rules;
+  and a mandatory source-linked reconciliation across every eligible company.
+- Delayed company-level forecast maturation plus standalone-versus-reconciled MAE and directional
+  accuracy, so forecast improvement is evaluated directly.
 - Three nested-comparison curves: original baseline, development-selected fixed strategy, and
   adaptive monthly strategy, with a sealed holdout label and no success requirement.
-- Three bounded experiments per month, a frozen 63-session projection per feasible experiment,
-  delayed outcomes, matured feedback, and visibly changing strategy versions.
+- Three bounded strategy experiments per month after the dynamic forecasting loop, a frozen
+  63-session projection per feasible experiment, delayed outcomes, matured feedback, and visibly
+  changing strategy versions.
 - OpenAI, Anthropic, Gemini, and Muse adapters plus deterministic mock, exact recorded replay,
   stage routing, retries, budgets, schema validation, evidence grounding, and provenance.
-- JSONL/Parquet artifacts, SQLite audit mirror, environment/model/data manifest, SHA-256 artifact
+- Agent action, tool observation, reconciliation, and company-outcome artifacts; JSONL/Parquet
+  exports; SQLite audit mirror; environment/model/data manifest; SHA-256 artifact
   integrity verification, FastAPI endpoints, local run queue, and Next.js dashboard.
-- Full synthetic dataset and a 25-month offline run; a second recorded run reproduces the same
-  decisions and metrics.
+- Full synthetic dataset and chronological offline runs with complete reasoning and reconciliation
+  traces.
 
 ## External gates intentionally not fabricated
 

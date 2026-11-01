@@ -184,7 +184,7 @@ class StockForecast(StrictModel):
     created_at: datetime
     symbol: str
     horizon_sessions: Literal[63] = 63
-    expected_return_3m: FiniteFloat
+    expected_return_3m: FiniteFloat = Field(ge=-1.0, le=3.0)
     confidence: Confidence
     rationale: str
     analysis_id: str
@@ -194,6 +194,91 @@ class StockForecast(StrictModel):
     model_settings_hash: str
     prompt_version: str
     is_retrospective: bool
+
+
+class ForecastAction(StrEnum):
+    """Bounded actions available to the monthly forecasting agent."""
+
+    INSPECT_MARKET_REGIME = "inspect_market_regime"
+    INSPECT_PEER_CONTEXT = "inspect_peer_context"
+    INSPECT_COMPANY_HISTORY = "inspect_company_history"
+    INSPECT_CALIBRATION = "inspect_calibration"
+    REVISE_FORECASTS = "revise_forecasts"
+    RECONCILE_FORECASTS = "reconcile_forecasts"
+    FINISH = "finish"
+
+
+class ForecastAgentDecision(StrictModel):
+    schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
+    action: ForecastAction
+    symbols: tuple[str, ...] = ()
+    question: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+    expected_information_gain: Confidence
+
+    @model_validator(mode="after")
+    def validate_targets(self) -> ForecastAgentDecision:
+        targeted = {
+            ForecastAction.INSPECT_PEER_CONTEXT,
+            ForecastAction.INSPECT_COMPANY_HISTORY,
+            ForecastAction.REVISE_FORECASTS,
+        }
+        if self.action in targeted and not self.symbols:
+            raise ValueError(f"{self.action} requires at least one symbol")
+        if len(self.symbols) > 5 or len(set(self.symbols)) != len(self.symbols):
+            raise ValueError("symbols must be unique and contain at most five targets")
+        if self.action in {
+            ForecastAction.INSPECT_MARKET_REGIME,
+            ForecastAction.INSPECT_CALIBRATION,
+            ForecastAction.RECONCILE_FORECASTS,
+            ForecastAction.FINISH,
+        } and self.symbols:
+            raise ValueError(f"{self.action} does not accept symbol targets")
+        return self
+
+
+class ReconciledStockForecast(StrictModel):
+    symbol: str = Field(min_length=1)
+    source_forecast_id: str = Field(min_length=1)
+    raw_expected_return_3m: FiniteFloat = Field(ge=-1.0, le=3.0)
+    expected_return_3m: FiniteFloat = Field(ge=-1.0, le=3.0)
+    confidence: Confidence
+    relative_rank: int = Field(ge=1)
+    bear_case_return: FiniteFloat = Field(ge=-1.0, le=3.0)
+    bull_case_return: FiniteFloat = Field(ge=-1.0, le=3.0)
+    adjustment_rationale: str = Field(min_length=1)
+    consistency_flags: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_scenario_order(self) -> ReconciledStockForecast:
+        if not self.bear_case_return <= self.expected_return_3m <= self.bull_case_return:
+            raise ValueError("expected return must lie between bear and bull cases")
+        return self
+
+
+class ForecastReconciliation(StrictModel):
+    schema_version: Literal[SCHEMA_VERSION] = SCHEMA_VERSION
+    reconciliation_id: str = "pending"
+    decision_as_of: datetime
+    provider: str = "pending"
+    model: str = "pending"
+    market_regime: str = Field(min_length=1)
+    market_expected_return_3m: FiniteFloat = Field(ge=-1.0, le=3.0)
+    common_factor_assumptions: tuple[str, ...]
+    forecasts: tuple[ReconciledStockForecast, ...]
+    cross_sectional_risks: tuple[str, ...]
+    confidence: Confidence
+    rationale: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_cross_section(self) -> ForecastReconciliation:
+        symbols = [forecast.symbol for forecast in self.forecasts]
+        ranks = [forecast.relative_rank for forecast in self.forecasts]
+        if not symbols or len(symbols) != len(set(symbols)):
+            raise ValueError("reconciliation forecasts must contain unique symbols")
+        if set(ranks) != set(range(1, len(ranks) + 1)):
+            raise ValueError("relative ranks must be contiguous from one")
+        return self
 
 
 class ExperimentType(StrEnum):

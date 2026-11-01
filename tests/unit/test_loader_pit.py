@@ -6,7 +6,7 @@ import pandas as pd
 from pandas.testing import assert_frame_equal
 
 from portfolio_agent.data import DatasetStore
-from portfolio_agent.portfolio.signals import build_signal_table
+from portfolio_agent.portfolio.signals import blend_reconciled_forecasts, build_signal_table
 
 DATASET = Path("examples/smoke")
 
@@ -38,3 +38,20 @@ def test_future_article_mutation_cannot_change_earlier_signal() -> None:
     mutated = replace(store, articles=pd.concat([store.articles, future], ignore_index=True))
     after = build_signal_table(mutated, day, research_blend=0.5).reset_index(drop=True)
     assert_frame_equal(before, after)
+
+
+def test_reconciled_forecasts_can_change_company_membership_ranking() -> None:
+    signals = pd.DataFrame(
+        {
+            "symbol": ["A", "B", "C"],
+            "rank_score": [2.0, 1.0, 0.0],
+        }
+    )
+
+    blended = blend_reconciled_forecasts(
+        signals,
+        {"A": -0.2, "B": 0.0, "C": 0.3},
+        confidence_scale=1.0,
+    )
+
+    assert blended["symbol"].tolist() == ["C", "B", "A"]

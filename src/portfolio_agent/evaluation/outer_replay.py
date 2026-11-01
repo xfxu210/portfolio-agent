@@ -13,18 +13,19 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from portfolio_agent.agents.forecasting import ForecastingAgent
 from portfolio_agent.agents.providers.base import LLMProvider
 from portfolio_agent.agents.research import ResearchService
 from portfolio_agent.config import ReplayConfig
 from portfolio_agent.data.loader import DatasetStore
-from portfolio_agent.domain.schemas import ExperimentProposal
+from portfolio_agent.domain.schemas import ExperimentProposal, ForecastReconciliation
 from portfolio_agent.evaluation.analytics import performance_metrics
 from portfolio_agent.evaluation.inner_walkforward import trailing_walkforward_score
 from portfolio_agent.persistence import ArtifactWriter, SQLiteLedger
 from portfolio_agent.persistence.artifact_writer import content_hash, sha256_path
 from portfolio_agent.portfolio.accounting import PortfolioAccount, price_map
 from portfolio_agent.portfolio.optimizer import optimize_portfolio, select_ten
-from portfolio_agent.portfolio.signals import build_signal_table
+from portfolio_agent.portfolio.signals import blend_reconciled_forecasts, build_signal_table
 from portfolio_agent.projections.monte_carlo import projection_fan
 
 
@@ -33,7 +34,7 @@ class StrategyParams:
     research_blend: float = 0.5
     confidence_scale: float = 0.75
     risk_aversion: float = 2.0
-    turnover_penalty: float = 0.5
+    turnover_penalty: float = 0.0
     covariance_lookback_sessions: int = 126
 
     def apply(self, proposal: ExperimentProposal) -> StrategyParams:
@@ -91,8 +92,19 @@ class ReplayEngine:
             provider,
             trace=lambda value: self.writer.append("traces.jsonl", value),
         )
+        self.forecasting_agent = ForecastingAgent(
+            store,
+            provider,
+            self.research,
+            config.agent.reasoning,
+            self.writer.append,
+        )
+        self.matured_stock_outcome_ids: set[str] = set()
         self.run_id = hashlib.sha256(
-            f"{store.dataset_hash}:{config.seed}:{config.agent.mode}".encode()
+            (
+                f"{store.dataset_hash}:{content_hash(config.model_dump(mode='json'))}:"
+                "forecast-agent-v2"
+            ).encode()
         ).hexdigest()[:16]
 
     def _proposal(
@@ -102,6 +114,7 @@ class ReplayEngine:
         evidence_ids: list[str],
         matured_feedback: list[dict[str, Any]],
         within_month_feedback: list[dict[str, Any]],
+        forecast_intelligence: dict[str, Any],
     ) -> ExperimentProposal:
         context = {
             "decision_as_of": datetime.combine(day, datetime.max.time(), tzinfo=UTC).isoformat(),
@@ -109,6 +122,7 @@ class ReplayEngine:
             "evidence_ids": evidence_ids,
             "matured_feedback": matured_feedback[-10:],
             "within_month_feedback": within_month_feedback,
+            "forecast_intelligence": forecast_intelligence,
         }
         result = self.provider.generate_structured(
             task="experiment_proposal",
@@ -133,6 +147,58 @@ class ReplayEngine:
             },
         )
         return result.value
+
+    def _realized_stock_forecast_outcomes(
+        self,
+        reconciliation: ForecastReconciliation,
+        *,
+        available_by: date | None = None,
+    ) -> list[dict[str, Any]]:
+        sessions = sorted(self.store.prices["date"].unique())
+        decision_day = reconciliation.decision_as_of.date()
+        try:
+            decision_index = sessions.index(decision_day)
+        except ValueError:
+            return []
+        execution_index = decision_index + 1
+        mature_index = execution_index + 63
+        if mature_index >= len(sessions):
+            return []
+        mature_day = sessions[mature_index]
+        if available_by is not None and mature_day > available_by:
+            return []
+        start_prices = price_map(self.store.prices, sessions[execution_index])
+        end_prices = price_map(self.store.prices, mature_day)
+        outcomes: list[dict[str, Any]] = []
+        for forecast in reconciliation.forecasts:
+            outcome_id = f"{reconciliation.reconciliation_id}:{forecast.symbol}"
+            if outcome_id in self.matured_stock_outcome_ids:
+                continue
+            if forecast.symbol not in start_prices or forecast.symbol not in end_prices:
+                continue
+            realized = end_prices[forecast.symbol] / start_prices[forecast.symbol] - 1
+            outcome = {
+                "outcome_id": outcome_id,
+                "reconciliation_id": reconciliation.reconciliation_id,
+                "source_forecast_id": forecast.source_forecast_id,
+                "symbol": forecast.symbol,
+                "decision_as_of": reconciliation.decision_as_of.isoformat(),
+                "matured_at": datetime.combine(
+                    mature_day, datetime.max.time(), tzinfo=UTC
+                ).isoformat(),
+                "expected_return_3m": forecast.expected_return_3m,
+                "raw_expected_return_3m": forecast.raw_expected_return_3m,
+                "confidence": forecast.confidence,
+                "realized_63_session_return": realized,
+                "forecast_error": realized - forecast.expected_return_3m,
+                "direction_correct": bool(
+                    np.sign(realized) == np.sign(forecast.expected_return_3m)
+                ),
+            }
+            outcomes.append(outcome)
+            self.matured_stock_outcome_ids.add(outcome_id)
+            self.writer.append("stock_forecast_outcomes.jsonl", outcome)
+        return outcomes
 
     def _realized_outcome(self, projection: dict[str, Any]) -> dict[str, Any] | None:
         sessions = sorted(self.store.prices["date"].unique())
@@ -185,7 +251,12 @@ class ReplayEngine:
         signals = build_signal_table(
             self.store, day, research_blend=candidate_params.research_blend
         )
-        selected = select_ten(signals, previous)
+        selection_signals = blend_reconciled_forecasts(
+            signals,
+            forecast_returns,
+            confidence_scale=candidate_params.confidence_scale,
+        )
+        selected = select_ten(selection_signals, previous)
         returns = _returns_matrix(self.store, day, candidate_params.covariance_lookback_sessions)
         covariance = returns[selected].cov() * 252
         priors = signals.set_index("symbol")["momentum"] * 0.25
@@ -275,7 +346,12 @@ class ReplayEngine:
 
     def _adaptive_schedule(
         self, dates: list[date]
-    ) -> tuple[dict[date, dict[str, float]], list[dict[str, Any]], StrategyParams]:
+    ) -> tuple[
+        dict[date, dict[str, float]],
+        list[dict[str, Any]],
+        StrategyParams,
+        list[ForecastReconciliation],
+    ]:
         previous = {
             holding.symbol: holding.weight for holding in self.store.initial_portfolio.holdings
         }
@@ -283,7 +359,9 @@ class ReplayEngine:
         schedule: dict[date, dict[str, float]] = {}
         accepted_history: list[dict[str, Any]] = []
         accepted_projections: list[dict[str, Any]] = []
+        accepted_reconciliations: list[ForecastReconciliation] = []
         matured_feedback: list[dict[str, Any]] = []
+        matured_stock_feedback: list[dict[str, Any]] = []
         matured_ids: set[str] = set()
         development_scores: dict[str, list[float]] = {}
         development_params: dict[str, StrategyParams] = {}
@@ -297,24 +375,39 @@ class ReplayEngine:
                     continue
                 matured_feedback.append(outcome)
                 matured_ids.add(projection_id)
-            signals = build_signal_table(self.store, day, research_blend=params.research_blend)
-            shortlist = list(dict.fromkeys([*previous, *signals["symbol"].head(15)]))[:20]
-            analyses = []
-            forecasts = []
-            forecast_returns: dict[str, float] = {}
-            priors = signals.set_index("symbol")["momentum"] * 0.25
-            for symbol in shortlist:
-                analysis, forecast = self.research.analyze_and_forecast(
-                    day, symbol, float(priors[symbol])
+            for pending_reconciliation in accepted_reconciliations:
+                matured_stock_feedback.extend(
+                    self._realized_stock_forecast_outcomes(
+                        pending_reconciliation, available_by=day
+                    )
                 )
-                analyses.append(analysis)
-                forecasts.append(forecast)
-                forecast_returns[symbol] = forecast.expected_return_3m
-                self.writer.append("company_analysis.jsonl", analysis)
-                self.writer.append("stock_forecasts.jsonl", forecast)
+            signals = build_signal_table(self.store, day, research_blend=params.research_blend)
+            shortlist = signals["symbol"].tolist()
+            priors = signals.set_index("symbol")["momentum"] * 0.25
+            forecast_result = self.forecasting_agent.run(
+                day,
+                shortlist,
+                {symbol: float(priors[symbol]) for symbol in shortlist},
+                signals,
+                matured_stock_feedback,
+            )
+            accepted_reconciliations.append(forecast_result.reconciliation)
+            forecast_returns = {
+                forecast.symbol: forecast.expected_return_3m
+                for forecast in forecast_result.reconciliation.forecasts
+            }
             evidence_ids = sorted(
-                {evidence_id for analysis in analyses for evidence_id in analysis.evidence_ids}
+                {
+                    evidence_id
+                    for analysis in forecast_result.analyses.values()
+                    for evidence_id in analysis.evidence_ids
+                }
             )[-30:]
+            forecast_intelligence = {
+                "reconciliation": forecast_result.reconciliation.model_dump(mode="json"),
+                "agent_actions": list(forecast_result.actions),
+                "matured_company_forecast_feedback": matured_stock_feedback[-20:],
+            }
             candidates: list[Candidate] = []
             within_month_feedback: list[dict[str, Any]] = []
             for iteration in range(self.config.iterations):
@@ -324,6 +417,7 @@ class ReplayEngine:
                     evidence_ids,
                     matured_feedback,
                     within_month_feedback,
+                    forecast_intelligence,
                 )
                 experiment_id = f"experiment-{day}-{iteration}"
                 candidate = self._candidate(
@@ -406,6 +500,10 @@ class ReplayEngine:
                     "weights": previous,
                     "accepted_experiment_id": None,
                     "accepted_projection_id": projection["projection_id"],
+                    "forecast_reconciliation_id": (
+                        forecast_result.reconciliation.reconciliation_id
+                    ),
+                    "forecast_agent_steps": len(forecast_result.actions),
                     "decision_status": "incumbent_retained_no_feasible_candidate",
                     "provider": self.provider.provider,
                     "model": self.provider.model,
@@ -445,6 +543,8 @@ class ReplayEngine:
                 "weights": previous,
                 "accepted_experiment_id": winner.projection["experiment_id"],
                 "accepted_projection_id": winner.projection["projection_id"],
+                "forecast_reconciliation_id": forecast_result.reconciliation.reconciliation_id,
+                "forecast_agent_steps": len(forecast_result.actions),
                 "decision_status": "candidate_accepted",
                 "provider": self.provider.provider,
                 "model": self.provider.model,
@@ -461,7 +561,7 @@ class ReplayEngine:
             fixed_params = development_params[selected_version]
         else:
             fixed_params = StrategyParams()
-        return schedule, accepted_history, fixed_params
+        return schedule, accepted_history, fixed_params, accepted_reconciliations
 
     def _fixed_schedule(
         self, dates: list[date], params: StrategyParams
@@ -530,7 +630,9 @@ class ReplayEngine:
 
     def run(self) -> dict[str, Any]:
         dates = self.store.decision_dates(self.config.warmup_sessions)
-        adaptive, _decisions, fixed_params = self._adaptive_schedule(dates)
+        adaptive, _decisions, fixed_params, reconciliations = self._adaptive_schedule(dates)
+        for reconciliation in reconciliations:
+            self._realized_stock_forecast_outcomes(reconciliation)
         fixed = self._fixed_schedule(dates, fixed_params)
         baseline_weights = {
             holding.symbol: holding.weight for holding in self.store.initial_portfolio.holdings
@@ -561,6 +663,46 @@ class ReplayEngine:
             name: performance_metrics(frame.set_index("date")["nav"])
             for name, frame in curves.groupby("strategy")
         }
+        stock_outcomes_path = self.output / "stock_forecast_outcomes.jsonl"
+        stock_outcomes = (
+            [
+                json.loads(line)
+                for line in stock_outcomes_path.read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+            if stock_outcomes_path.exists()
+            else []
+        )
+        if stock_outcomes:
+            reconciled_errors = np.array(
+                [float(item["forecast_error"]) for item in stock_outcomes]
+            )
+            standalone_errors = np.array(
+                [
+                    float(item["realized_63_session_return"])
+                    - float(item["raw_expected_return_3m"])
+                    for item in stock_outcomes
+                ]
+            )
+            forecast_quality = {
+                "matured_forecasts": len(stock_outcomes),
+                "standalone_mae": float(np.mean(np.abs(standalone_errors))),
+                "reconciled_mae": float(np.mean(np.abs(reconciled_errors))),
+                "standalone_directional_accuracy": float(
+                    np.mean(
+                        [
+                            np.sign(float(item["raw_expected_return_3m"]))
+                            == np.sign(float(item["realized_63_session_return"]))
+                            for item in stock_outcomes
+                        ]
+                    )
+                ),
+                "reconciled_directional_accuracy": float(
+                    np.mean([bool(item["direction_correct"]) for item in stock_outcomes])
+                ),
+            }
+        else:
+            forecast_quality = {"matured_forecasts": 0}
         split_index = int(len(dates) * self.config.development_fraction)
         holdout_start = dates[split_index]
         evaluation_start = dates[0]
@@ -626,11 +768,15 @@ class ReplayEngine:
             "fixed_strategy_version": fixed_params.version,
             "fixed_strategy_params": fixed_params.__dict__,
             "matured_projection_outcomes": outcome_count,
+            "forecast_reconciliation_count": len(reconciliations),
+            "matured_stock_forecast_outcomes": len(self.matured_stock_outcome_ids),
+            "forecast_quality": forecast_quality,
             "model_call_count": trace_count,
             "routing": routing,
             "metrics": metrics,
             "partition_metrics": partition_metrics,
             "average_monthly_turnover": average_turnover,
+            "transaction_costs_ignored": True,
             "warning": "Synthetic/retrospective research simulation; not investment advice.",
         }
         self.writer.write("summary.json", summary)
@@ -649,6 +795,30 @@ class ReplayEngine:
                     f"Sharpe {values['sharpe']:.6f}"
                 )
             report.append("")
+        report.extend(["## Forecast quality", ""])
+        report.append(f"- Matured company forecasts: {forecast_quality['matured_forecasts']}")
+        if forecast_quality["matured_forecasts"]:
+            report.extend(
+                [
+                    f"- Standalone MAE: {forecast_quality['standalone_mae']:.6f}",
+                    f"- Reconciled MAE: {forecast_quality['reconciled_mae']:.6f}",
+                    (
+                        "- Standalone directional accuracy: "
+                        f"{forecast_quality['standalone_directional_accuracy']:.6f}"
+                    ),
+                    (
+                        "- Reconciled directional accuracy: "
+                        f"{forecast_quality['reconciled_directional_accuracy']:.6f}"
+                    ),
+                ]
+            )
+        report.extend(
+            [
+                "",
+                "Transaction costs are intentionally ignored in this run.",
+                "",
+            ]
+        )
         report.append("Synthetic and retrospective results do not establish investment alpha.\n")
         (self.output / "report.md").write_text("\n".join(report), encoding="utf-8")
         SQLiteLedger(self.output / "run.sqlite3").capture(self.output, summary)
@@ -670,10 +840,12 @@ class ReplayEngine:
             "routing": routing,
             "generation_settings": self.config.agent.generation.model_dump(mode="json"),
             "budgets": self.config.agent.budgets.model_dump(mode="json"),
+            "reasoning_settings": self.config.agent.reasoning.model_dump(mode="json"),
             "policy_hash": content_hash(self.config.model_dump(mode="json")),
             "schema_hash": content_hash(self.store.manifest.schema_version),
             "model_call_count": trace_count,
             "fee_bps": self.config.fee_bps,
+            "transaction_costs_ignored": True,
             "python_version": platform.python_version(),
             "library_versions": {
                 package: importlib.metadata.version(package)

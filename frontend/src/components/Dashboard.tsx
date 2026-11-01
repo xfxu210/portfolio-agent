@@ -25,6 +25,16 @@ type Run = {
   partition_metrics?: Record<string, Record<string, Metrics>>;
   average_monthly_turnover?: Record<string, number>;
   routing?: Record<string, { provider: string; model: string }>;
+  forecast_reconciliation_count?: number;
+  matured_stock_forecast_outcomes?: number;
+  forecast_quality?: {
+    matured_forecasts: number;
+    standalone_mae?: number;
+    reconciled_mae?: number;
+    standalone_directional_accuracy?: number;
+    reconciled_directional_accuracy?: number;
+  };
+  transaction_costs_ignored?: boolean;
   warning: string;
 };
 
@@ -36,6 +46,8 @@ type Decision = {
   weights: Record<string, number>;
   accepted_experiment_id: string | null;
   accepted_projection_id: string;
+  forecast_reconciliation_id?: string;
+  forecast_agent_steps?: number;
   development: boolean;
 };
 type Experiment = {
@@ -65,14 +77,55 @@ type MonthDetail = {
     forecast_error: number;
     status: string;
   }[];
-  forecasts: unknown[];
+  forecasts: {
+    forecast_id: string;
+    symbol: string;
+    expected_return_3m: number;
+    confidence: number;
+  }[];
   analyses: {
+    analysis_id: string;
     symbol: string;
     rationale: string;
     evidence_ids: string[];
     provider: string;
     model: string;
   }[];
+  forecast_reconciliations: {
+    reconciliation_id: string;
+    market_regime: string;
+    market_expected_return_3m: number;
+    confidence: number;
+    rationale: string;
+    forecasts: {
+      symbol: string;
+      source_forecast_id: string;
+      raw_expected_return_3m: number;
+      expected_return_3m: number;
+      confidence: number;
+      relative_rank: number;
+      bear_case_return: number;
+      bull_case_return: number;
+      adjustment_rationale: string;
+    }[];
+  }[];
+  stock_forecast_outcomes: {
+    source_forecast_id: string;
+    symbol: string;
+    realized_63_session_return: number;
+    forecast_error: number;
+    direction_correct: boolean;
+  }[];
+  agent_actions: {
+    step: number;
+    action: string;
+    symbols: string[];
+    question: string;
+    rationale: string;
+    expected_information_gain: number;
+    status: string;
+  }[];
+  agent_observations: unknown[];
   traces: unknown[];
 };
 type Dataset = { path: string; dataset_version: string; profile: string };
@@ -245,6 +298,12 @@ export function Dashboard() {
   const outcome = detail?.outcomes.find(
     (item) => item.projection_id === detail.decision.accepted_projection_id,
   );
+  const reconciliation = detail?.forecast_reconciliations.find(
+    (item) => item.reconciliation_id === detail.decision.forecast_reconciliation_id,
+  ) ?? detail?.forecast_reconciliations.at(-1);
+  const stockOutcomeByForecast = new Map(
+    (detail?.stock_forecast_outcomes ?? []).map((item) => [item.source_forecast_id, item]),
+  );
 
   const startRun = () => {
     setError(null);
@@ -281,7 +340,7 @@ export function Dashboard() {
           </section>
 
           <section className="panel heroPanel">
-            <div className="panelTitle"><div><span className="eyebrow">REALIZED, AFTER COSTS</span><h2>Portfolio paths</h2></div><span className="pill">Common calendar</span></div>
+            <div className="panelTitle"><div><span className="eyebrow">REALIZED · NO TRANSACTION COSTS</span><h2>Portfolio paths</h2></div><span className="pill">Common calendar</span></div>
             <EquityChart points={curves} />
             <div className="metricsGrid">
               {Object.entries(run.metrics).map(([strategy, metric]) => (
@@ -294,9 +353,24 @@ export function Dashboard() {
           </section>
 
           <section className="panel partitionPanel">
-            <div className="panelTitle"><div><span className="eyebrow">SEALED EVALUATION</span><h2>Development vs holdout</h2></div><span className="pill">Same costs · same calendar</span></div>
+            <div className="panelTitle"><div><span className="eyebrow">SEALED EVALUATION</span><h2>Development vs holdout</h2></div><span className="pill">Costs ignored · same calendar</span></div>
             <div className="partitionGrid">{Object.entries(run.partition_metrics ?? {}).map(([partition, strategies]) => <article key={partition}><h3>{partition}</h3>{Object.entries(strategies).map(([strategy, metric]) => <div key={strategy}><span>{LABELS[strategy]}</span><b>{formatPercent(metric.total_return)}</b><small>Sharpe {metric.sharpe.toFixed(2)}</small></div>)}</article>)}</div>
           </section>
+
+          {run.forecast_quality && run.forecast_quality.matured_forecasts > 0 ? (
+            <section className="panel forecastQualityPanel">
+              <div className="panelTitle">
+                <div><span className="eyebrow">FORECAST EVALUATION</span><h2>Did reconciliation help?</h2></div>
+                <span className="pill">{run.forecast_quality.matured_forecasts} matured company forecasts</span>
+              </div>
+              <div className="qualityGrid">
+                <div><span>Standalone MAE</span><strong>{formatPercent(run.forecast_quality.standalone_mae ?? 0)}</strong></div>
+                <div><span>Reconciled MAE</span><strong>{formatPercent(run.forecast_quality.reconciled_mae ?? 0)}</strong></div>
+                <div><span>Standalone direction</span><strong>{formatPercent(run.forecast_quality.standalone_directional_accuracy ?? 0)}</strong></div>
+                <div><span>Reconciled direction</span><strong>{formatPercent(run.forecast_quality.reconciled_directional_accuracy ?? 0)}</strong></div>
+              </div>
+            </section>
+          ) : null}
 
           <section className="workspace">
             <aside className="panel timeline">
@@ -331,6 +405,92 @@ export function Dashboard() {
             </div>
           </section>
 
+          <section className="panel agentPanel">
+            <div className="panelTitle">
+              <div>
+                <span className="eyebrow">DECIDE → ACT → OBSERVE → REVISE</span>
+                <h2>Forecasting agent trace</h2>
+              </div>
+              <span className="pill">{detail?.agent_actions.length ?? 0} decisions</span>
+            </div>
+            {(detail?.agent_actions.length ?? 0) === 0 ? (
+              <div className="empty">This older run predates the dynamic forecasting agent.</div>
+            ) : (
+              <div className="actionTimeline">
+                {detail?.agent_actions.map((action) => (
+                  <article key={`${action.step}-${action.action}`}>
+                    <b>{String(action.step + 1).padStart(2, "0")}</b>
+                    <div>
+                      <span>{action.action.replaceAll("_", " ")}</span>
+                      <p>{action.question}</p>
+                      <small>
+                        {action.symbols.length ? `${action.symbols.join(", ")} · ` : ""}
+                        expected information gain {formatPercent(action.expected_information_gain)}
+                      </small>
+                    </div>
+                    <em>{action.status}</em>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="panel reconciliationPanel">
+            <div className="panelTitle">
+              <div>
+                <span className="eyebrow">CROSS-COMPANY CONSISTENCY</span>
+                <h2>Reconciled return forecasts</h2>
+              </div>
+              {reconciliation ? (
+                <span className="pill">
+                  {reconciliation.market_regime} · {formatPercent(reconciliation.confidence)} confidence
+                </span>
+              ) : null}
+            </div>
+            {!reconciliation ? (
+              <div className="empty">No reconciliation artifact exists for this run.</div>
+            ) : (
+              <>
+                <p className="reconciliationRationale">{reconciliation.rationale}</p>
+                <div className="forecastTableWrap">
+                  <table className="forecastTable">
+                    <thead>
+                      <tr>
+                        <th>Rank</th>
+                        <th>Company</th>
+                        <th>Standalone</th>
+                        <th>Reconciled</th>
+                        <th>Bear / bull</th>
+                        <th>Confidence</th>
+                        <th>Realized</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...reconciliation.forecasts]
+                        .sort((a, b) => a.relative_rank - b.relative_rank)
+                        .map((forecast) => {
+                          const realized = stockOutcomeByForecast.get(forecast.source_forecast_id);
+                          return (
+                            <tr key={forecast.symbol}>
+                              <td>{forecast.relative_rank}</td>
+                              <td><strong>{forecast.symbol}</strong></td>
+                              <td>{formatPercent(forecast.raw_expected_return_3m)}</td>
+                              <td>{formatPercent(forecast.expected_return_3m)}</td>
+                              <td>
+                                {formatPercent(forecast.bear_case_return)} / {formatPercent(forecast.bull_case_return)}
+                              </td>
+                              <td>{formatPercent(forecast.confidence)}</td>
+                              <td>{realized ? formatPercent(realized.realized_63_session_return) : "Pending"}</td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </section>
+
           <section className="panel experiments">
             <div className="panelTitle"><div><span className="eyebrow">MEASURED, NOT NARRATED</span><h2>Within-month experiments</h2></div></div>
             <div className="experimentGrid">
@@ -348,7 +508,7 @@ export function Dashboard() {
 
           <section className="panel evidencePanel">
             <div className="panelTitle"><div><span className="eyebrow">DATED EVIDENCE</span><h2>Grounded company research</h2></div><span className="pill">{detail?.analyses.length ?? 0} analyses</span></div>
-            <div className="evidenceGrid">{(detail?.analyses ?? []).slice(0, 6).map((analysis) => <article key={analysis.symbol}><div><strong>{analysis.symbol}</strong><small>{analysis.provider} / {analysis.model}</small></div><p>{analysis.rationale}</p><code>{analysis.evidence_ids.slice(0, 4).join(" · ") || "No dated evidence"}</code></article>)}</div>
+            <div className="evidenceGrid">{(detail?.analyses ?? []).slice(0, 6).map((analysis) => <article key={analysis.analysis_id}><div><strong>{analysis.symbol}</strong><small>{analysis.provider} / {analysis.model}</small></div><p>{analysis.rationale}</p><code>{analysis.evidence_ids.slice(0, 4).join(" · ") || "No dated evidence"}</code></article>)}</div>
           </section>
 
           <footer><p>{run.warning}</p><p>All model evidence is dated and all projections are immutable artifacts.</p></footer>

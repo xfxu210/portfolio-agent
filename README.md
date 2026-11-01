@@ -1,9 +1,11 @@
 # Portfolio Agent
 
 Portfolio Agent is an auditable, point-in-time portfolio research and optimization agent.
-It replays monthly decisions over an immutable offline dataset, asks a selected language
-model for grounded forecasts and bounded strategy experiments, and reserves ranking,
-optimization, accounting, projections, and acceptance decisions for deterministic code.
+It replays monthly decisions over an immutable offline dataset. A selected language model runs a
+bounded decide-act-observe loop, chooses which forecasting questions and tools to pursue, revises
+uncertain company estimates, and reconciles the complete eligible-company forecast cross-section.
+Portfolio constraints, optimization, accounting, projections, and artifact validation remain
+deterministic.
 
 The repository is independently runnable. It does not require a private optimizer or a
 runtime financial-data service.
@@ -15,11 +17,15 @@ runtime financial-data service.
 
 - A fixed formation universe is filtered by historical eligibility at every decision.
 - Research and fundamentals require `available_at <= decision_as_of`.
+- The forecasting model dynamically chooses market, peer, company-history, calibration, revision,
+  reconciliation, or stop actions under explicit step and call budgets.
+- Every eligible company forecast is reconciled against all others before portfolio construction.
+- Standalone and reconciled forecast accuracy are measured after the full 63-session horizon.
 - Exactly ten long-only holdings are optimized under weight and turnover constraints.
 - Each meaningful experiment receives an immutable 63-session projection fan.
 - Forecast errors mature only after the full horizon and become feedback for later months.
-- Original, development-selected fixed, and adaptive strategies share execution timing,
-  costs, and the same calendar.
+- Original, development-selected fixed, and adaptive strategies share execution timing and the
+  same calendar. Transaction costs are intentionally ignored in this forecasting-focused version.
 - Negative and rejected experiments remain visible.
 - Mock, live, and recorded modes use the same typed provider boundary.
 
@@ -109,24 +115,26 @@ cd frontend && npm run lint && npm run build
 `portfolio-agent verify RUN_DIR` recomputes every reported curve metric from stored numeric
 artifacts and reports tampering or inconsistencies.
 
-Optional robustness sweeps retain every result across cost and projection-seed assumptions:
+Optional robustness sweeps retain every result across projection-seed assumptions:
 
 ```bash
 .venv/bin/python scripts/run_robustness.py --dataset examples/smoke \
-  --out runs/robustness --fees 0 10 25 --seeds 42 43
+  --out runs/robustness --seeds 42 43
 ```
 
 ## Delivered local reference run
 
 The checked implementation has been exercised against `synthetic-full-v1`: 756 exchange
 sessions, 40 equities, 782 dated research records, 480 point-in-time fundamentals, 25 monthly
-decisions, 75 experiments/projections, and 66 matured projection outcomes. The result is
-deliberately negative: the adaptive run underperformed the original baseline. The UI keeps that
+decisions, 25 complete 40-company reconciliations, 880 matured company forecasts, and 75 strategy
+experiments/projections. The deterministic mock result remains negative and does not show reliable
+forecast improvement. The UI keeps standalone-versus-reconciled accuracy and portfolio failures
 visible; the project makes no alpha claim.
 
 An authenticated two-month OpenAI `gpt-4.1-mini` acceptance replay was executed using an existing
-local credential without copying it into this project: 50 genuine calls produced 24 analyses,
-24 forecasts, and two experiments. Its captured responses replayed without a key and reproduced
-the same strategy and metrics exactly. A smaller secret-free response is committed as a provider
-contract fixture. Muse, Anthropic, and Gemini live calls remain conditional on their respective
-credentials; all adapters otherwise share the tested provider contract.
+local credential without copying it into this project: 61 genuine calls produced 24 initial
+company analyses, 24 forecasts, different runtime-chosen research actions in each month, two full
+12-company reconciliations, and two strategy experiments. Its captured responses replayed without
+a key and reproduced the same strategy and metrics exactly. A smaller secret-free response is
+committed as a provider contract fixture. Muse, Anthropic, and Gemini live calls remain conditional
+on their respective credentials; all adapters otherwise share the tested provider contract.

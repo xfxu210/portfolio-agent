@@ -18,6 +18,13 @@ are normalized through identical Pydantic schemas. Refusals, empty output, netwo
 and schema-invalid output are explicit provider errors; the system never silently swaps a
 provider or substitutes mock output.
 
+The same provider boundary covers company analysis, standalone forecasts, agent action selection,
+targeted forecast revisions, all-company reconciliation, and bounded strategy proposals. The
+agent may choose tools dynamically, but code validates tool names, target symbols, step budgets,
+forecast provenance, full reconciliation coverage, and contiguous ranks. Reconciliation requires
+a larger structured-output allowance than a single-company response; the default is 16,000 output
+tokens and should be reduced only when the eligible universe is correspondingly smaller.
+
 Model APIs and supported structured-output parameters change. Validate model IDs and current
 provider capabilities before a live run. Exact provider responses—not presumed sampling
 determinism—are the basis of recorded replay.

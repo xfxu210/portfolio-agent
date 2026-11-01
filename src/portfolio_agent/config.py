@@ -12,15 +12,21 @@ class StrictConfig(BaseModel):
 
 
 class GenerationConfig(StrictConfig):
-    max_output_tokens: int = Field(default=1600, ge=1)
+    max_output_tokens: int = Field(default=16_000, ge=1)
     timeout_seconds: int = Field(default=90, ge=1)
     max_retries: int = Field(default=2, ge=0, le=5)
 
 
 class BudgetConfig(StrictConfig):
-    max_model_calls_per_month: int = Field(default=50, ge=1)
-    max_total_input_tokens: int = Field(default=1_500_000, ge=1)
-    max_total_output_tokens: int = Field(default=120_000, ge=1)
+    max_model_calls_per_month: int = Field(default=150, ge=1)
+    max_total_input_tokens: int = Field(default=5_000_000, ge=1)
+    max_total_output_tokens: int = Field(default=500_000, ge=1)
+
+
+class ReasoningConfig(StrictConfig):
+    max_steps: int = Field(default=7, ge=2, le=12)
+    min_information_gain: float = Field(default=0.05, ge=0.0, le=1.0)
+    max_revision_symbols: int = Field(default=3, ge=1, le=5)
 
 
 class StageRoute(StrictConfig):
@@ -35,6 +41,7 @@ class AgentConfig(StrictConfig):
     stage_overrides: dict[str, StageRoute] = {}
     generation: GenerationConfig = GenerationConfig()
     budgets: BudgetConfig = BudgetConfig()
+    reasoning: ReasoningConfig = ReasoningConfig()
 
     @model_validator(mode="after")
     def live_requires_explicit_model(self) -> AgentConfig:
@@ -46,7 +53,7 @@ class AgentConfig(StrictConfig):
 class ReplayConfig(StrictConfig):
     seed: int = 42
     iterations: int = Field(default=3, ge=1, le=5)
-    fee_bps: float = Field(default=10.0, ge=0)
+    fee_bps: Literal[0.0] = 0.0
     warmup_sessions: int = Field(default=252, ge=126)
     development_fraction: float = Field(default=0.6, gt=0.2, lt=0.9)
     agent: AgentConfig = AgentConfig()

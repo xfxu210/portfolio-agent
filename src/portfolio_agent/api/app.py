@@ -48,7 +48,7 @@ def _load_job(job_id: str) -> dict | None:
         ).fetchone()
     return json.loads(row[0]) if row else None
 
-app = FastAPI(title="Portfolio Agent", version="0.1.0")
+app = FastAPI(title="Portfolio Agent", version="0.2.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -220,6 +220,26 @@ def get_month(run_id: str, month_id: str) -> dict:
             item
             for item in _read_jsonl(root / "company_analysis.jsonl")
             if item.get("decision_as_of", "").startswith(month_id)
+        ],
+        "forecast_reconciliations": [
+            item
+            for item in _read_jsonl(root / "forecast_reconciliations.jsonl")
+            if item.get("decision_as_of", "").startswith(month_id)
+        ],
+        "stock_forecast_outcomes": [
+            item
+            for item in _read_jsonl(root / "stock_forecast_outcomes.jsonl")
+            if item.get("decision_as_of", "").startswith(month_id)
+        ],
+        "agent_actions": [
+            item
+            for item in _read_jsonl(root / "agent_actions.jsonl")
+            if item.get("month_id") == month_id
+        ],
+        "agent_observations": [
+            item
+            for item in _read_jsonl(root / "agent_observations.jsonl")
+            if item.get("month_id") == month_id
         ],
         "traces": [
             item
