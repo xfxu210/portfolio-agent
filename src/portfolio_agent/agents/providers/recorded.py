@@ -39,7 +39,12 @@ class RecordedProvider:
             raise ProviderError("recording_missing", f"no recorded response for {request_id}")
         # Validate through JSON so strict tuple/enum fields have the same semantics
         # as a live provider response.
-        value = response_model.model_validate_json(json.dumps(item["normalized"]))
+        normalized = dict(item["normalized"])
+        if "provider" in response_model.model_fields:
+            normalized["provider"] = item["provider"]
+        if "model" in response_model.model_fields:
+            normalized["model"] = item["model"]
+        value = response_model.model_validate_json(json.dumps(normalized))
         return StructuredResult(
             value=value,
             provider=item["provider"],

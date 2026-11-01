@@ -113,6 +113,11 @@ class ResearchService:
                     "ungrounded_evidence",
                     f"company analysis cited unknown evidence IDs: {sorted(unknown)}",
                 )
+            if result.value.symbol != symbol or result.value.decision_as_of != cutoff:
+                raise ProviderError(
+                    "provenance_mismatch",
+                    "company analysis symbol/decision_as_of does not match request context",
+                )
             self._record("company_analysis", request_id, result, day)
             self.cache[analysis_key] = result.value
         analysis = self.cache[analysis_key]
@@ -131,6 +136,15 @@ class ResearchService:
                 raise ProviderError(
                     "ungrounded_evidence",
                     f"stock forecast cited unknown evidence IDs: {sorted(unknown)}",
+                )
+            if (
+                result.value.symbol != symbol
+                or result.value.decision_as_of != cutoff
+                or result.value.analysis_id != analysis.analysis_id
+            ):
+                raise ProviderError(
+                    "provenance_mismatch",
+                    "stock forecast symbol/date/analysis linkage does not match request context",
                 )
             self._record("stock_forecast", request_id, result, day)
             self.cache[forecast_key] = result.value

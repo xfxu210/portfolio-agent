@@ -4,6 +4,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -96,6 +97,26 @@ class JsonProvider:
                     raise ProviderError(
                         "schema_validation", str(exc), retryable=True
                     ) from exc
+                updates: dict[str, Any] = {}
+                fields = response_model.model_fields
+                if "provider" in fields:
+                    updates["provider"] = self.provider
+                if "model" in fields:
+                    updates["model"] = self.model
+                if "model_settings_hash" in fields:
+                    updates["model_settings_hash"] = hashlib.sha256(
+                        f"{self.provider}:{self.model}:{task}".encode()
+                    ).hexdigest()
+                if "prompt_version" in fields:
+                    updates["prompt_version"] = "v1"
+                if "created_at" in fields:
+                    updates["created_at"] = datetime.now(UTC)
+                if "retrospective_model" in fields:
+                    updates["retrospective_model"] = True
+                if "is_retrospective" in fields:
+                    updates["is_retrospective"] = True
+                if updates:
+                    value = value.model_copy(update=updates)
                 break
             except ProviderError as exc:
                 last_error = exc
