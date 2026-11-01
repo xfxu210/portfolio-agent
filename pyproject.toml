@@ -33,6 +33,9 @@ dev = ["httpx>=0.28", "pytest>=8.3", "pytest-cov>=6", "ruff>=0.9"]
 [project.scripts]
 portfolio-agent = "portfolio_agent.cli:app"
 
+[project.urls]
+Repository = "https://github.com/xfxu210/portfolio-agent"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/portfolio_agent"]
 

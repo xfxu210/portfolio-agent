@@ -12,6 +12,7 @@
    directional accuracy after 63 sessions, not by a persuasive rationale.
 6. Select the final month. Explain why its 63-session actual result remains pending.
 7. Open the exported report and run `portfolio-agent verify runs/demo`.
-8. Show `portfolio-agent data validate` and the exact dataset hash.
+8. Show `portfolio-agent data validate`, the exact dataset hash, and—after publication—the pinned
+   Hugging Face repository ID and full commit SHA recorded in the run manifest.
 9. Show the genuine OpenAI acceptance run and then its exact recorded replay without a
    key. If Muse credentials are later available, repeat the same bounded acceptance command for it.

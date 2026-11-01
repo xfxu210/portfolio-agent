@@ -1,11 +1,18 @@
 # Delivery Status
 
-This document separates implemented local deliverables from external publication prerequisites.
+This document separates implemented and published deliverables from remaining external
+publication prerequisites.
+
+## Published
+
+- The application source, tests, smoke fixture, CI workflow, and documentation are public at
+  [github.com/xfxu210/portfolio-agent](https://github.com/xfxu210/portfolio-agent).
 
 ## Implemented and verified locally
 
 - Strict point-in-time schemas, checksummed Parquet/JSON loading, and a pinned-revision-only
-  Hugging Face downloader.
+  Hugging Face downloader. Downloaded repository and revision metadata flow into validation,
+  summaries, and run manifests.
 - Fixed formation universe, dynamic exactly-ten-stock selection, bounded CVXPY allocation,
   next-session execution, drift, and objective performance metrics. Transaction costs are zero by
   explicit request in the current forecasting-focused version.
@@ -31,9 +38,8 @@ This document separates implemented local deliverables from external publication
 
 - Hugging Face upload requires the user's namespace, `HF_TOKEN`, and explicit publication action.
   The payload passes the dry-run gate, but no public URL or commit SHA is claimed.
-- GitHub publication and demo-video upload require the destination account/repository. The two
-  local repositories are complete and can be pushed without generated data, environments, keys,
-  or run directories.
+- Demo-video hosting remains an external submission step. The private data-preparation repository
+  is intentionally not published; only its approved dataset payload is eligible for Hugging Face.
 - Muse, Claude, and Gemini live smoke calls require `MODEL_API_KEY`, `ANTHROPIC_API_KEY`, and
   `GOOGLE_API_KEY`. Missing credentials fail before a run starts. OpenAI authentication was tested
   with a bounded two-month, 50-call replay and an exact no-key recorded replay.

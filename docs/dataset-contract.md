@@ -18,5 +18,8 @@ Generated analyses, forecasts, weights, experiments, projections, and realized l
 outputs—not source-data inputs.
 
 The consumer requires a full immutable Hugging Face revision and independently verifies every
-manifest hash after download.
-
+manifest hash after download. `portfolio-agent data download` writes the separately resolved
+dataset repository ID and full 40-character commit SHA to `.portfolio-agent-source.json`; this
+local source record is not part of the dataset payload manifest. Validation exposes the source,
+and replay copies it into `summary.json` and the run `manifest.json`. Locally prepared datasets
+honestly record both values as `null`.

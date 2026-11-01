@@ -1,5 +1,7 @@
 # Portfolio Agent
 
+Public repository: [github.com/xfxu210/portfolio-agent](https://github.com/xfxu210/portfolio-agent)
+
 Portfolio Agent is an auditable, point-in-time portfolio research and optimization agent.
 It replays monthly decisions over an immutable offline dataset. A selected language model runs a
 bounded decide-act-observe loop, loads specialized forecasting skills, chooses which tools and
@@ -38,6 +40,8 @@ runtime financial-data service.
 Requires Python 3.12 and Node.js 22 or newer.
 
 ```bash
+git clone https://github.com/xfxu210/portfolio-agent.git
+cd portfolio-agent
 make install
 make smoke
 make replay
@@ -65,6 +69,20 @@ portfolio-agent replay --dataset /path/to/output/approved \
   --mode mock --adaptive --rebalance monthly --iterations 3 --out runs/demo
 portfolio-agent verify runs/demo
 ```
+
+After the dataset is published, download it only by its full immutable Hugging Face commit:
+
+```bash
+portfolio-agent data download \
+  --repo-id <HF_NAMESPACE>/portfolio-agent-data \
+  --revision <FULL_40_CHARACTER_COMMIT_SHA> \
+  --output data/synthetic-full-v1
+portfolio-agent data validate --dataset data/synthetic-full-v1
+```
+
+The download records the repository ID and revision in local source metadata. Validation displays
+both values, and every replay copies them into its summary and run manifest. Mutable names such as
+`main` are rejected.
 
 The demo run generates 25 monthly decisions, three realized curves, all trial projections,
 matured outcomes, immutable model artifacts, a SQLite audit mirror, and a portable report.
@@ -106,8 +124,10 @@ The public runtime consumes a validated snapshot and never extracts private fina
 The separate private preparation workspace owns source inventory, rights decisions,
 normalization, synthetic-full generation, validation, and optional Hugging Face publication.
 See [methodology](docs/methodology.md), [dataset contract](docs/dataset-contract.md),
-[agent skills](docs/agent-skills.md), [licensing](docs/data-licensing.md), and
-[limitations](docs/limitations.md).
+[agent skills](docs/agent-skills.md), [architecture](docs/architecture.md),
+[model providers](docs/model-providers.md), [licensing](docs/data-licensing.md),
+[limitations](docs/limitations.md), [delivery status](docs/delivery-status.md), and the
+[demo script](docs/demo-script.md).
 
 ## Verification
 

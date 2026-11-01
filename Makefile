@@ -14,7 +14,6 @@ test:
 	cd frontend && npm run build
 
 smoke:
-	.venv/bin/python scripts/generate_smoke_data.py --out examples/smoke
 	.venv/bin/portfolio-agent data validate --dataset examples/smoke
 
 replay:
@@ -28,4 +27,3 @@ frontend:
 
 demo:
 	@echo "Run 'make api' and 'make frontend' in two terminals, then open http://127.0.0.1:3000"
-
