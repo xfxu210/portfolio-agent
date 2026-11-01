@@ -124,7 +124,9 @@ decisions, 75 experiments/projections, and 66 matured projection outcomes. The r
 deliberately negative: the adaptive run underperformed the original baseline. The UI keeps that
 visible; the project makes no alpha claim.
 
-An authenticated OpenAI `gpt-4.1-mini` structured call was also executed using an existing local
-credential without copying it into this project. A secret-free normalized response is committed
-as a recorded-provider contract fixture. Muse, Anthropic, and Gemini live calls remain conditional
-on their respective credentials; all adapters otherwise share the tested provider contract.
+An authenticated two-month OpenAI `gpt-4.1-mini` acceptance replay was executed using an existing
+local credential without copying it into this project: 50 genuine calls produced 24 analyses,
+24 forecasts, and two experiments. Its captured responses replayed without a key and reproduced
+the same strategy and metrics exactly. A smaller secret-free response is committed as a provider
+contract fixture. Muse, Anthropic, and Gemini live calls remain conditional on their respective
+credentials; all adapters otherwise share the tested provider contract.

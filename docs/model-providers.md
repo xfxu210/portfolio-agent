@@ -22,3 +22,6 @@ Model APIs and supported structured-output parameters change. Validate model IDs
 provider capabilities before a live run. Exact provider responses—not presumed sampling
 determinism—are the basis of recorded replay.
 
+For a bounded authenticated acceptance run, `configs/live-smoke-openai.yaml` limits the smoke
+fixture to its final decision months, one experiment per month, strict budgets, and the exact
+`gpt-4.1-mini` model. The key remains process-local and is never written to an artifact.

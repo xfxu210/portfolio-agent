@@ -1,0 +1,18 @@
+seed: 42
+iterations: 1
+fee_bps: 10.0
+warmup_sessions: 378
+development_fraction: 0.6
+agent:
+  mode: live
+  provider: openai
+  model: gpt-4.1-mini
+  stage_overrides: {}
+  generation:
+    max_output_tokens: 1600
+    timeout_seconds: 90
+    max_retries: 2
+  budgets:
+    max_model_calls_per_month: 50
+    max_total_input_tokens: 150000
+    max_total_output_tokens: 30000

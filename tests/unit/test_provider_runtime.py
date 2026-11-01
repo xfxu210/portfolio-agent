@@ -19,7 +19,7 @@ class FlakyJsonProvider(JsonProvider):
         self.invocations = 0
 
     def _invoke(self, **kwargs):
-        del kwargs
+        self.last_messages = kwargs["messages"]
         self.invocations += 1
         if self.invocations == 1:
             return "{}", {}
@@ -46,6 +46,7 @@ def test_structured_provider_retries_bounded_schema_failure() -> None:
     )
     assert provider.invocations == 2
     assert result.request_id == "retry-ok"
+    assert "failed validation" in provider.last_messages[-1]["content"]
 
 
 def test_budget_provider_fails_before_exceeding_monthly_calls() -> None:

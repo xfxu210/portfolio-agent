@@ -27,6 +27,7 @@ This document separates implemented local deliverables from external publication
   local repositories are complete and can be pushed without generated data, environments, keys,
   or run directories.
 - Muse, Claude, and Gemini live smoke calls require `MODEL_API_KEY`, `ANTHROPIC_API_KEY`, and
-  `GOOGLE_API_KEY`. Missing credentials fail before a run starts. OpenAI authentication was tested.
+  `GOOGLE_API_KEY`. Missing credentials fail before a run starts. OpenAI authentication was tested
+  with a bounded two-month, 50-call replay and an exact no-key recorded replay.
 - No rights-cleared real historical corpus was available. The shipped three-year profile is fully
   synthetic and labeled on every record and in the dashboard.

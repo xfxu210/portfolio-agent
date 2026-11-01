@@ -552,8 +552,18 @@ class ReplayEngine:
                 capture_output=True,
                 text=True,
             ).stdout.strip()
+            git_dirty = bool(
+                subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    cwd=self.output.parent.parent,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+            )
         except (OSError, subprocess.CalledProcessError):
             git_commit = "uncommitted"
+            git_dirty = True
         trace_count = sum(
             1
             for line in (self.output / "traces.jsonl").read_text(encoding="utf-8").splitlines()
@@ -598,6 +608,7 @@ class ReplayEngine:
         manifest = {
             "run_id": self.run_id,
             "git_commit": git_commit,
+            "git_dirty": git_dirty,
             "dataset_id": self.store.manifest.dataset_version,
             "dataset_hash": self.store.dataset_hash,
             "dataset_files": self.store.manifest.files,
