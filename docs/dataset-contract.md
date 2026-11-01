@@ -17,6 +17,9 @@ is never treated as fundamental availability. Unknown rights fail closed.
 Generated analyses, forecasts, weights, experiments, projections, and realized labels are run
 outputs—not source-data inputs.
 
+The release dataset is
+[cognitmarket/portfolio-agent-data](https://huggingface.co/datasets/cognitmarket/portfolio-agent-data)
+at immutable revision `74c1790faeefc527c7fd69469b0f4b50b67d3425`, licensed CC BY 4.0.
 The consumer requires a full immutable Hugging Face revision and independently verifies every
 manifest hash after download. `portfolio-agent data download` writes the separately resolved
 dataset repository ID and full 40-character commit SHA to `.portfolio-agent-source.json`; this

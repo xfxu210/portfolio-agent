@@ -35,6 +35,7 @@ portfolio-agent = "portfolio_agent.cli:app"
 
 [project.urls]
 Repository = "https://github.com/xfxu210/portfolio-agent"
+Dataset = "https://huggingface.co/datasets/cognitmarket/portfolio-agent-data"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/portfolio_agent"]

@@ -1,0 +1,6 @@
+repo_id: cognitmarket/portfolio-agent-data
+revision: 74c1790faeefc527c7fd69469b0f4b50b67d3425
+dataset_version: synthetic-full-v1
+dataset_hash: 89eab7b81044fe286d6a18cebba6a7f33701f94ec0288e41581363b4fe64ed36
+manifest_sha256: 6370d3babce11a4eb43ac8bd58955fab5e59d52d297aadd254ca4bb356b83809
+license: CC-BY-4.0

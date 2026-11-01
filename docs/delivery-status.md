@@ -7,6 +7,9 @@ publication prerequisites.
 
 - The application source, tests, smoke fixture, CI workflow, and documentation are public at
   [github.com/xfxu210/portfolio-agent](https://github.com/xfxu210/portfolio-agent).
+- The CC BY 4.0 synthetic-full dataset is public at
+  [cognitmarket/portfolio-agent-data](https://huggingface.co/datasets/cognitmarket/portfolio-agent-data),
+  pinned at commit `74c1790faeefc527c7fd69469b0f4b50b67d3425`.
 
 ## Implemented and verified locally
 
@@ -36,8 +39,6 @@ publication prerequisites.
 
 ## External gates intentionally not fabricated
 
-- Hugging Face upload requires the user's namespace, `HF_TOKEN`, and explicit publication action.
-  The payload passes the dry-run gate, but no public URL or commit SHA is claimed.
 - Demo-video hosting remains an external submission step. The private data-preparation repository
   is intentionally not published; only its approved dataset payload is eligible for Hugging Face.
 - Muse, Claude, and Gemini live smoke calls require `MODEL_API_KEY`, `ANTHROPIC_API_KEY`, and

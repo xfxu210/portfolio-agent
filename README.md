@@ -70,12 +70,14 @@ portfolio-agent replay --dataset /path/to/output/approved \
 portfolio-agent verify runs/demo
 ```
 
-After the dataset is published, download it only by its full immutable Hugging Face commit:
+The complete synthetic dataset is public at
+[cognitmarket/portfolio-agent-data](https://huggingface.co/datasets/cognitmarket/portfolio-agent-data).
+Download it only by its full immutable Hugging Face commit:
 
 ```bash
 portfolio-agent data download \
-  --repo-id <HF_NAMESPACE>/portfolio-agent-data \
-  --revision <FULL_40_CHARACTER_COMMIT_SHA> \
+  --repo-id cognitmarket/portfolio-agent-data \
+  --revision 74c1790faeefc527c7fd69469b0f4b50b67d3425 \
   --output data/synthetic-full-v1
 portfolio-agent data validate --dataset data/synthetic-full-v1
 ```
