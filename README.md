@@ -109,6 +109,13 @@ cd frontend && npm run lint && npm run build
 `portfolio-agent verify RUN_DIR` recomputes every reported curve metric from stored numeric
 artifacts and reports tampering or inconsistencies.
 
+Optional robustness sweeps retain every result across cost and projection-seed assumptions:
+
+```bash
+.venv/bin/python scripts/run_robustness.py --dataset examples/smoke \
+  --out runs/robustness --fees 0 10 25 --seeds 42 43
+```
+
 ## Delivered local reference run
 
 The checked implementation has been exercised against `synthetic-full-v1`: 756 exchange

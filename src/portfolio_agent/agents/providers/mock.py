@@ -80,11 +80,17 @@ class MockProvider:
         elif response_model is ExperimentProposal:
             iteration = int(context.get("iteration", 0))
             matured_feedback = context.get("matured_feedback", [])
+            calibrated = len(matured_feedback) >= 5
             recent_error = (
-                float(matured_feedback[-1]["forecast_error"]) if matured_feedback else 0.0
+                float(
+                    sum(abs(item["forecast_error"]) for item in matured_feedback[-10:])
+                    / len(matured_feedback[-10:])
+                )
+                if calibrated
+                else 0.0
             )
-            feedback_risk_aversion = 4.0 if abs(recent_error) > 0.05 else 2.0
-            feedback_confidence_scale = 0.5 if abs(recent_error) > 0.05 else 0.75
+            feedback_risk_aversion = 4.0 if recent_error > 0.05 else 2.0
+            feedback_confidence_scale = 0.5 if recent_error > 0.05 else 0.75
             choices = (
                 (
                     ExperimentType.RESEARCH_BLEND,

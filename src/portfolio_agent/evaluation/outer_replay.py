@@ -19,6 +19,7 @@ from portfolio_agent.config import ReplayConfig
 from portfolio_agent.data.loader import DatasetStore
 from portfolio_agent.domain.schemas import ExperimentProposal
 from portfolio_agent.evaluation.analytics import performance_metrics
+from portfolio_agent.evaluation.inner_walkforward import trailing_walkforward_score
 from portfolio_agent.persistence import ArtifactWriter, SQLiteLedger
 from portfolio_agent.persistence.artifact_writer import content_hash, sha256_path
 from portfolio_agent.portfolio.accounting import PortfolioAccount, price_map
@@ -216,17 +217,19 @@ class ReplayEngine:
             )
             return None
         weight_vector = pd.Series(optimized.weights)
-        trailing = returns[weight_vector.index].dot(weight_vector)
         calibration_error = (
             float(np.mean([abs(item["forecast_error"]) for item in matured_feedback[-10:]]))
             if matured_feedback
             else 0.0
         )
-        score = float(
-            trailing.mean() * 252
-            - candidate_params.risk_aversion * trailing.std(ddof=0) * np.sqrt(252)
-            - optimized.one_way_turnover * self.config.fee_bps / 10_000
-            - calibration_error * candidate_params.confidence_scale
+        score = trailing_walkforward_score(
+            returns,
+            weight_vector,
+            risk_aversion=candidate_params.risk_aversion,
+            one_way_turnover=optimized.one_way_turnover,
+            fee_bps=self.config.fee_bps,
+            calibration_error=calibration_error,
+            confidence_scale=candidate_params.confidence_scale,
         )
         expected_return = float(expected.dot(weight_vector))
         volatility = float(np.sqrt(weight_vector @ covariance @ weight_vector))
