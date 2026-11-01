@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "portfolio-agent"
+version = "0.1.0"
+description = "Auditable point-in-time portfolio research and optimization agent"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+dependencies = [
+  "anthropic>=0.75",
+  "cvxpy>=1.6",
+  "fastapi>=0.115",
+  "google-genai>=1.0",
+  "huggingface-hub>=0.27",
+  "numpy>=2.1",
+  "openai>=1.60",
+  "pandas>=2.2",
+  "pyarrow>=18",
+  "pydantic>=2.10",
+  "pydantic-settings>=2.7",
+  "PyYAML>=6.0",
+  "scipy>=1.14",
+  "typer>=0.15",
+  "uvicorn>=0.34",
+]
+
+[project.optional-dependencies]
+dev = ["httpx>=0.28", "pytest>=8.3", "pytest-cov>=6", "ruff>=0.9"]
+
+[project.scripts]
+portfolio-agent = "portfolio_agent.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/portfolio_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+

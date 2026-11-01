@@ -1,0 +1,17 @@
+seed: 42
+iterations: 3
+fee_bps: 10.0
+warmup_sessions: 252
+development_fraction: 0.6
+agent:
+  mode: mock
+  stage_overrides: {}
+  generation:
+    max_output_tokens: 1600
+    timeout_seconds: 90
+    max_retries: 2
+  budgets:
+    max_model_calls_per_month: 50
+    max_total_input_tokens: 1500000
+    max_total_output_tokens: 120000
+

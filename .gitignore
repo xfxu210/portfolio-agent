@@ -1,0 +1,12 @@
+.venv/
+.env
+.env.local
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+data/
+runs/
+runs-archive/
+frontend/node_modules/
+frontend/.next/

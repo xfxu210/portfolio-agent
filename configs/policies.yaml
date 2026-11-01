@@ -1,0 +1,10 @@
+experiment_allowlist:
+  research_blend: [0.0, 1.0]
+  confidence_scale: [0.25, 1.0]
+  risk_aversion: [0.5, 8.0]
+  turnover_penalty: [0.0, 5.0]
+  covariance_lookback_sessions: [126, 189, 252, 378, 504]
+selection:
+  maximum_iterations: 5
+  default_iterations: 3
+  minimum_score_improvement: 0.0
