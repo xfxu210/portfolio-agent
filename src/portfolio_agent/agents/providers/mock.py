@@ -69,7 +69,7 @@ class MockProvider:
                 "expected_return_3m": float(context.get("quant_prior", 0.02)),
                 "confidence": 0.5,
                 "rationale": "Deterministic mock forecast.",
-                "analysis_id": f"analysis-{digest[:12]}",
+                "analysis_id": context.get("analysis_id", f"analysis-{digest[:12]}"),
                 "evidence_ids": evidence_ids,
                 "provider": "mock",
                 "model": self.model,

@@ -1,11 +1,15 @@
 import json
+from datetime import date
+from pathlib import Path
 
 import pytest
 
 from portfolio_agent.agents.providers.base import JsonProvider, ProviderError
 from portfolio_agent.agents.providers.budgeted import BudgetedProvider
 from portfolio_agent.agents.providers.mock import MockProvider
+from portfolio_agent.agents.research import ResearchService
 from portfolio_agent.config import BudgetConfig
+from portfolio_agent.data import DatasetStore
 from portfolio_agent.domain.schemas import ExperimentProposal
 
 
@@ -71,3 +75,10 @@ def test_budget_provider_fails_before_exceeding_monthly_calls() -> None:
             response_model=ExperimentProposal,
             request_id="proposal:2025-01-15:1",
         )
+
+
+def test_mock_forecast_is_linked_to_generated_analysis() -> None:
+    service = ResearchService(DatasetStore.load(Path("examples/smoke")), MockProvider())
+    analysis, forecast = service.analyze_and_forecast(date(2025, 1, 2), "SMOKE01", 0.02)
+    assert forecast.analysis_id == analysis.analysis_id
+    assert forecast.symbol == analysis.symbol
