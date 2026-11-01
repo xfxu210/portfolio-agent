@@ -511,6 +511,23 @@ class ReplayEngine:
                 pending = schedule[day]
         return pd.DataFrame(rows)
 
+    def _average_turnover(self, schedule: dict[date, dict[str, float]]) -> float:
+        previous = {
+            holding.symbol: holding.weight for holding in self.store.initial_portfolio.holdings
+        }
+        values = []
+        for day in sorted(schedule):
+            target = schedule[day]
+            values.append(
+                0.5
+                * sum(
+                    abs(target.get(symbol, 0.0) - previous.get(symbol, 0.0))
+                    for symbol in set(target) | set(previous)
+                )
+            )
+            previous = target
+        return float(np.mean(values)) if values else 0.0
+
     def run(self) -> dict[str, Any]:
         dates = self.store.decision_dates(self.config.warmup_sessions)
         adaptive, _decisions, fixed_params = self._adaptive_schedule(dates)
@@ -543,6 +560,29 @@ class ReplayEngine:
         metrics = {
             name: performance_metrics(frame.set_index("date")["nav"])
             for name, frame in curves.groupby("strategy")
+        }
+        split_index = int(len(dates) * self.config.development_fraction)
+        holdout_start = dates[split_index]
+        evaluation_start = dates[0]
+        partition_metrics: dict[str, dict[str, dict[str, float]]] = {
+            "development": {},
+            "holdout": {},
+        }
+        for name, frame in curves.groupby("strategy"):
+            development = frame[
+                (frame["date"] >= evaluation_start) & (frame["date"] < holdout_start)
+            ]
+            holdout = frame[frame["date"] >= holdout_start]
+            partition_metrics["development"][name] = performance_metrics(
+                development.set_index("date")["nav"]
+            )
+            partition_metrics["holdout"][name] = performance_metrics(
+                holdout.set_index("date")["nav"]
+            )
+        average_turnover = {
+            "original_baseline": self._average_turnover(baseline),
+            "development_selected_fixed": self._average_turnover(fixed),
+            "adaptive_agent": self._average_turnover(adaptive),
         }
         try:
             git_commit = subprocess.run(
@@ -589,6 +629,8 @@ class ReplayEngine:
             "model_call_count": trace_count,
             "routing": routing,
             "metrics": metrics,
+            "partition_metrics": partition_metrics,
+            "average_monthly_turnover": average_turnover,
             "warning": "Synthetic/retrospective research simulation; not investment advice.",
         }
         self.writer.write("summary.json", summary)
@@ -596,6 +638,16 @@ class ReplayEngine:
         for name, values in metrics.items():
             report.extend([f"## {name}", ""])
             report.extend(f"- {key}: {value:.6f}" for key, value in values.items())
+            report.append("")
+        report.extend(["## Development and holdout", ""])
+        for partition, strategies in partition_metrics.items():
+            report.append(f"### {partition.title()}")
+            report.append("")
+            for name, values in strategies.items():
+                report.append(
+                    f"- {name}: return {values['total_return']:.6f}; "
+                    f"Sharpe {values['sharpe']:.6f}"
+                )
             report.append("")
         report.append("Synthetic and retrospective results do not establish investment alpha.\n")
         (self.output / "report.md").write_text("\n".join(report), encoding="utf-8")

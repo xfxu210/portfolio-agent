@@ -48,6 +48,14 @@ dl { margin: 0; }
 dt { color: var(--muted); font-size: .65rem; margin-bottom: 4px; }
 dd { margin: 0; font-variant-numeric: tabular-nums; }
 .workspace { display: grid; grid-template-columns: 280px 1fr; gap: 18px; margin-bottom: 18px; }
+.partitionPanel { margin-bottom: 18px; }
+.partitionGrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.partitionGrid article { border: 1px solid var(--line); border-radius: 5px; background: #0b1512; overflow: hidden; }
+.partitionGrid h3 { padding: 13px 16px; text-transform: capitalize; border-bottom: 1px solid var(--line); }
+.partitionGrid article > div { display: grid; grid-template-columns: 1fr 70px 100px; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: .76rem; }
+.partitionGrid article > div:last-child { border-bottom: 0; }
+.partitionGrid b { text-align: right; }
+.partitionGrid small { color: var(--muted); text-align: right; }
 .timeline { padding: 0; overflow: hidden; }
 .timeline .panelTitle { padding: 24px 20px 0; }
 .monthList { max-height: 680px; overflow-y: auto; border-top: 1px solid var(--line); }
@@ -88,4 +96,4 @@ code { display: block; color: var(--gold); background: #101e1a; padding: 8px; bo
 footer { display: flex; justify-content: space-between; color: var(--muted); font-size: .72rem; padding: 24px 4px; }
 .error, .loading, .empty { padding: 30px; border: 1px solid var(--line); color: var(--muted); }
 @media (max-width: 1050px) { .provenance { grid-template-columns: repeat(2, 1fr); } .workspace { grid-template-columns: 1fr; } .timeline { max-height: 300px; } }
-@media (max-width: 760px) { main { width: min(100% - 20px, 1480px); padding-top: 20px; } header { align-items: start; display: grid; gap: 20px; } .runControls { justify-content: start; } .provenance, .metricsGrid, .detailColumn, .experimentGrid, .evidenceGrid { grid-template-columns: 1fr; } .legend { flex-wrap: wrap; } footer { display: grid; gap: 8px; } }
+@media (max-width: 760px) { main { width: min(100% - 20px, 1480px); padding-top: 20px; } header { align-items: start; display: grid; gap: 20px; } .runControls { justify-content: start; } .provenance, .metricsGrid, .detailColumn, .experimentGrid, .evidenceGrid, .partitionGrid { grid-template-columns: 1fr; } .legend { flex-wrap: wrap; } footer { display: grid; gap: 8px; } }

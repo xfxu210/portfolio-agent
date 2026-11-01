@@ -6,11 +6,10 @@
    there is no hardcoded success banner.
 3. Select February 2024. Show the evidence-bound experiment cards, ten-stock allocation,
    frozen projected fan, and matured prediction-versus-actual result.
-4. Select May 2024. Show that completed forecast error caused confidence scaling to shrink,
+4. Select September 2024. Show that enough matured forecast errors caused confidence scaling to shrink,
    creating a new strategy version without changing the frozen meta-policy.
 5. Select the final month. Explain why its 63-session actual result remains pending.
 6. Open the exported report and run `portfolio-agent verify runs/demo`.
 7. Show `portfolio-agent data validate` and the exact dataset hash.
-8. If Muse credentials are available, show one genuine short live trace and then replay the
-   captured output in recorded mode without a key.
-
+8. Show the genuine two-month OpenAI acceptance run and then its exact recorded replay without a
+   key. If Muse credentials are later available, repeat the same bounded acceptance command for it.

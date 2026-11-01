@@ -22,6 +22,9 @@ type Run = {
   development_decisions: number;
   holdout_decisions: number;
   metrics: Record<string, Metrics>;
+  partition_metrics?: Record<string, Record<string, Metrics>>;
+  average_monthly_turnover?: Record<string, number>;
+  routing?: Record<string, { provider: string; model: string }>;
   warning: string;
 };
 
@@ -272,7 +275,7 @@ export function Dashboard() {
         <>
           <section className="provenance">
             <div><span>Dataset</span><strong>{run.dataset_version}</strong><small>{run.dataset_hash.slice(0, 16)}…</small></div>
-            <div><span>Inference</span><strong>{run.provider} / {run.model}</strong><small>{run.mode} mode</small></div>
+            <div><span>Inference</span><strong>{run.provider} / {run.model}</strong><small>{Object.keys(run.routing ?? {}).length ? Object.entries(run.routing ?? {}).map(([stage, route]) => `${stage}: ${route.provider}/${route.model}`).join(" · ") : `${run.mode} mode · default route`}</small></div>
             <div><span>Decisions</span><strong>{run.decision_count} months</strong><small>{run.development_decisions} development · {run.holdout_decisions} holdout</small></div>
             <div className="warning"><span>Provenance</span><strong>Synthetic · retrospective</strong><small>Not investment advice</small></div>
           </section>
@@ -284,10 +287,15 @@ export function Dashboard() {
               {Object.entries(run.metrics).map(([strategy, metric]) => (
                 <article key={strategy}>
                   <h3><i style={{ background: COLORS[strategy] }} />{LABELS[strategy]}</h3>
-                  <dl><div><dt>Return</dt><dd>{formatPercent(metric.total_return)}</dd></div><div><dt>Sharpe</dt><dd>{metric.sharpe.toFixed(2)}</dd></div><div><dt>Drawdown</dt><dd>{formatPercent(metric.max_drawdown)}</dd></div></dl>
+                  <dl><div><dt>Return</dt><dd>{formatPercent(metric.total_return)}</dd></div><div><dt>Sharpe</dt><dd>{metric.sharpe.toFixed(2)}</dd></div><div><dt>Drawdown</dt><dd>{formatPercent(metric.max_drawdown)}</dd></div><div><dt>Volatility</dt><dd>{formatPercent(metric.annualized_volatility)}</dd></div><div><dt>Avg turnover</dt><dd>{formatPercent(run.average_monthly_turnover?.[strategy] ?? 0)}</dd></div></dl>
                 </article>
               ))}
             </div>
+          </section>
+
+          <section className="panel partitionPanel">
+            <div className="panelTitle"><div><span className="eyebrow">SEALED EVALUATION</span><h2>Development vs holdout</h2></div><span className="pill">Same costs · same calendar</span></div>
+            <div className="partitionGrid">{Object.entries(run.partition_metrics ?? {}).map(([partition, strategies]) => <article key={partition}><h3>{partition}</h3>{Object.entries(strategies).map(([strategy, metric]) => <div key={strategy}><span>{LABELS[strategy]}</span><b>{formatPercent(metric.total_return)}</b><small>Sharpe {metric.sharpe.toFixed(2)}</small></div>)}</article>)}</div>
           </section>
 
           <section className="workspace">
