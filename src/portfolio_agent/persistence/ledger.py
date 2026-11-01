@@ -31,6 +31,15 @@ class SQLiteLedger:
                 "INSERT OR REPLACE INTO runs VALUES (?, ?)",
                 (summary["run_id"], json.dumps(summary, sort_keys=True)),
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS state_transitions "
+                "(sequence INTEGER PRIMARY KEY, state TEXT NOT NULL, payload_json TEXT NOT NULL)"
+            )
+            connection.execute("DELETE FROM state_transitions")
+            connection.execute(
+                "INSERT INTO state_transitions VALUES (?, ?, ?)",
+                (0, "completed", json.dumps({"run_id": summary["run_id"]}, sort_keys=True)),
+            )
             for table, filename in self.TABLES.items():
                 connection.execute(
                     f"CREATE TABLE IF NOT EXISTS {table} "

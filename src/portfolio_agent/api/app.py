@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,6 +22,31 @@ DEFAULT_DATASET = Path(
     os.environ.get("PORTFOLIO_AGENT_DATASET", "examples/smoke")
 ).resolve()
 RUN_STATUSES: dict[str, dict] = {}
+
+
+def _persist_job(status: dict) -> None:
+    RUNS_ROOT.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(RUNS_ROOT / "jobs.sqlite3") as connection:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS jobs "
+            "(job_id TEXT PRIMARY KEY, status_json TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT OR REPLACE INTO jobs VALUES (?, ?)",
+            (status["job_id"], json.dumps(status, sort_keys=True)),
+        )
+        connection.commit()
+
+
+def _load_job(job_id: str) -> dict | None:
+    database = RUNS_ROOT / "jobs.sqlite3"
+    if not database.exists():
+        return None
+    with sqlite3.connect(database) as connection:
+        row = connection.execute(
+            "SELECT status_json FROM jobs WHERE job_id = ?", (job_id,)
+        ).fetchone()
+    return json.loads(row[0]) if row else None
 
 app = FastAPI(title="Portfolio Agent", version="0.1.0")
 app.add_middleware(
@@ -94,6 +120,7 @@ class RunRequest(BaseModel):
 
 def _execute_run(job_id: str, request: RunRequest, output: Path) -> None:
     RUN_STATUSES[job_id]["status"] = "running"
+    _persist_job(RUN_STATUSES[job_id])
     try:
         agent = AgentConfig(
             mode=request.mode,
@@ -105,8 +132,10 @@ def _execute_run(job_id: str, request: RunRequest, output: Path) -> None:
         provider = build_provider(config.agent)
         summary = ReplayEngine(store, provider, config, output).run()
         RUN_STATUSES[job_id].update(status="complete", run_id=summary["run_id"])
+        _persist_job(RUN_STATUSES[job_id])
     except Exception as exc:  # Keep the local queue observable without leaking secrets.
         RUN_STATUSES[job_id].update(status="failed", error=type(exc).__name__)
+        _persist_job(RUN_STATUSES[job_id])
 
 
 @app.post("/api/runs", status_code=202)
@@ -121,13 +150,14 @@ def create_run(request: RunRequest, background_tasks: BackgroundTasks) -> dict:
         "created_at": datetime.now(UTC).isoformat(),
         "output": str(output),
     }
+    _persist_job(RUN_STATUSES[job_id])
     background_tasks.add_task(_execute_run, job_id, request, output)
     return RUN_STATUSES[job_id]
 
 
 @app.get("/api/jobs/{job_id}")
 def get_job(job_id: str) -> dict:
-    status = RUN_STATUSES.get(job_id)
+    status = RUN_STATUSES.get(job_id) or _load_job(job_id)
     if status is None:
         raise HTTPException(status_code=404, detail="job not found")
     return status
