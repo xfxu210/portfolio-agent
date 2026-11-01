@@ -1,14 +1,62 @@
+import json
+import shutil
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from pandas.testing import assert_frame_equal
 
 from portfolio_agent.data import DatasetStore
+from portfolio_agent.data.hf_download import SOURCE_METADATA_FILE, download_dataset
 from portfolio_agent.portfolio.signals import blend_reconciled_forecasts, build_signal_table
 
 DATASET = Path("examples/smoke")
+
+
+def test_hugging_face_download_records_immutable_source(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    revision = "a" * 40
+    dataset = tmp_path / "dataset"
+    dataset.mkdir()
+
+    def fake_download(**kwargs) -> str:
+        assert kwargs["repo_type"] == "dataset"
+        assert kwargs["revision"] == revision
+        return str(dataset)
+
+    monkeypatch.setattr("portfolio_agent.data.hf_download.snapshot_download", fake_download)
+    result = download_dataset("example/portfolio-agent-data", revision, dataset)
+
+    assert result == dataset
+    assert json.loads((dataset / SOURCE_METADATA_FILE).read_text(encoding="utf-8")) == {
+        "repo_id": "example/portfolio-agent-data",
+        "revision": revision,
+    }
+
+
+def test_hugging_face_download_rejects_mutable_revision(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="full immutable commit SHA"):
+        download_dataset("example/portfolio-agent-data", "main", tmp_path / "dataset")
+
+
+def test_loader_retains_hugging_face_source(tmp_path: Path) -> None:
+    dataset = tmp_path / "dataset"
+    shutil.copytree(DATASET, dataset)
+    revision = "b" * 40
+    (dataset / SOURCE_METADATA_FILE).write_text(
+        json.dumps({"repo_id": "example/portfolio-agent-data", "revision": revision}),
+        encoding="utf-8",
+    )
+
+    store = DatasetStore.load(dataset)
+
+    assert store.source is not None
+    assert store.source.repo_id == "example/portfolio-agent-data"
+    assert store.source.revision == revision
 
 
 def test_loader_enforces_point_in_time_research() -> None:

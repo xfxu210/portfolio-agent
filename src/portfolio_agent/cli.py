@@ -37,6 +37,8 @@ def data_validate(dataset: Annotated[Path, typer.Option()]) -> None:
                 "dataset_version": store.manifest.dataset_version,
                 "coverage": store.manifest.coverage,
                 "dataset_hash": store.dataset_hash,
+                "dataset_repo_id": store.source.repo_id if store.source else None,
+                "dataset_revision": store.source.revision if store.source else None,
             },
             indent=2,
         )
